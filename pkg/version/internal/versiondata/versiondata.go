@@ -1,7 +1,7 @@
 package versiondata
 
 const (
-	defaultProduct = "io.mesosphere.csi.lvm"
+	defaultProduct = "datalake.speedboat.seagate.com"
 	defaultVersion = "v0-dev"
 )
 

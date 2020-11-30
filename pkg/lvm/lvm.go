@@ -133,7 +133,7 @@ func (r VolumeLayout) extentsFree(count uint64) uint64 {
 	switch r.Type {
 	case VolumeTypeDefault, VolumeTypeLinear:
 		return count
-	case VolumeTypeRAID1:
+	case VolumeTypeRAID1, VolumeTypeRAID10:
 		mirrors := r.Mirrors
 		if mirrors == 0 {
 			// Mirrors is unspecified, so we set it to the default value of 1.
@@ -242,6 +242,7 @@ var (
 	VolumeTypeDefault VolumeType
 	VolumeTypeLinear  = VolumeType{"linear"}
 	VolumeTypeRAID1   = VolumeType{"raid1"}
+	VolumeTypeRAID10  = VolumeType{"raid10"}
 )
 
 // VolumeLayout controls the RAID-related CLI options passed to lvcreate. See the
@@ -250,12 +251,14 @@ var (
 type VolumeLayout struct {
 	// Type corresponds to the --type= option to lvcreate.
 	Type VolumeType
-	// Type corresponds to the --mirrors= option to lvcreate.
+	// Mirrors corresponds to the --mirrors= option to lvcreate.
 	Mirrors uint64
-	// Type corresponds to the --stripes= option to lvcreate.
+	// Stripes corresponds to the --stripes= option to lvcreate.
 	Stripes uint64
-	// Type corresponds to the --stripesize= option to lvcreate.
+	// StripeSize corresponds to the --stripesize= option to lvcreate.
 	StripeSize uint64
+	// Nosync corresponds to the --nosync option to lvcreate.
+	Nosync uint64
 }
 
 func (c VolumeLayout) MinNumberOfDevices() uint64 {
@@ -271,6 +274,16 @@ func (c VolumeLayout) MinNumberOfDevices() uint64 {
 			mirrors = 1
 		}
 		return 2 * mirrors
+	case VolumeTypeRAID10:
+		mirrors := c.Mirrors
+		if mirrors == 0 {
+			mirrors = 1
+		}
+		stripes := c.Stripes
+		if stripes == 0 {
+			stripes = 2
+		}
+		return 2 * mirrors * stripes
 	default:
 		panic(fmt.Sprintf("unsupported volume type: %v", c.Type))
 	}
@@ -284,6 +297,8 @@ func (c VolumeLayout) Flags() (fs []string) {
 		fs = append(fs, "--type=linear")
 	case VolumeTypeRAID1:
 		fs = append(fs, "--type=raid1")
+	case VolumeTypeRAID10:
+		fs = append(fs, "--type=raid10")
 	default:
 		panic(fmt.Sprintf("lvm: unexpected volume type: %v", c.Type))
 	}
@@ -310,6 +325,12 @@ func (c VolumeLayout) Flags() (fs []string) {
 		// of 0 for this field type is treated as 'unspecified'.
 	default:
 		fs = append(fs, fmt.Sprintf("--stripesize=%d", c.StripeSize))
+	}
+	switch c.Nosync {
+	case 1:
+		fs = append(fs, "--nosync")
+	default:
+		// Default behavior of lvmcreate is to synchronize the mirror 
 	}
 	return fs
 }
@@ -373,7 +394,11 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 		return nil, err
 	}
-	return &LogicalVolume{name, sizeInBytes, vg}, nil
+	// Deactivate so another node in the cluster can activate
+	// If new LV is not activated the --nosyn will be ignored
+	newlv := &LogicalVolume{name, sizeInBytes, vg}
+	newlv.Deactivate()
+	return newlv, nil
 }
 
 // ValidateLogicalVolumeName validates a volume group name. A valid volume
@@ -457,7 +482,12 @@ func (vg *VolumeGroup) FindLogicalVolume(matchFirst func(lvsItem) bool) (*Logica
 	result := new(lvsOutput)
 	if err := run("lvs", result, "--options=lv_name,lv_size,vg_name,lv_tags", vg.Name()); err != nil {
 		if IsLogicalVolumeNotFound(err) {
-			return nil, ErrLogicalVolumeNotFound
+			RefreshMetaData()
+			if err := run("lvs", result, "--options=lv_name,lv_size,vg_name,lv_tags", vg.Name()); err != nil {
+				if IsLogicalVolumeNotFound(err) {
+					return nil, ErrLogicalVolumeNotFound
+				}
+			}
 		}
 		return nil, err
 	}
@@ -473,6 +503,16 @@ func (vg *VolumeGroup) FindLogicalVolume(matchFirst func(lvsItem) bool) (*Logica
 		}
 	}
 	return nil, ErrLogicalVolumeNotFound
+}
+
+func RefreshMetaData(){
+	c := exec.Command("partprobe")
+	log.Printf("Executing: partprobe")
+	c.Run()
+	//FIXME: Do we need to handle missing/failing partprobe?
+	if err := PVScan(""); err != nil {
+		log.Printf("error during pvscan: %v", err)
+	}
 }
 
 // ListLogicalVolumes returns the names of the logical volumes in this volume group.
@@ -640,6 +680,21 @@ func (lv *LogicalVolume) Tags() ([]string, error) {
 
 func (lv *LogicalVolume) Remove() error {
 	if err := run("lvremove", nil, "-f", lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
+
+func (lv *LogicalVolume) Activate() error {
+	if err := run("lvchange", nil, "-ay", lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lv *LogicalVolume) Deactivate() error {
+	if err := run("lvchange", nil, "-an", lv.vg.name+"/"+lv.name); err != nil {
 		return err
 	}
 	return nil

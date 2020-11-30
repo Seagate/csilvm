@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	topologyKey = "io.mesosphere.csi.lvm/nodeId"
+	topologyKey = "datalake.speedboat.seagate.com/nodeId"
 )
 
 type Server struct {
@@ -705,27 +705,29 @@ func (s *Server) DeleteVolume(
 		response := &csi.DeleteVolumeResponse{}
 		return response, nil
 	}
-	log.Printf("Determining volume path")
-	path, err := lv.Path()
-	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Error in Path(): err=%v",
-			err)
-	}
-	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
-		return nil, status.Errorf(
-			codes.Internal,
-			"The device path does not exist, cannot zero volume contents. To bypass the zeroing of the volume contents, ensure the file exists, or create it by hand, and reissue the DeleteVolume operation. path=%s",
-			path)
-	}
-	log.Printf("Deleting data on device %v", path)
-	if err := deleteDataOnDevice(path); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Cannot delete data from device: err=%v",
-			err)
-	}
+	// LVs most likely not mounted on this host.  Skipping stat'ing path
+	//log.Printf("Determining volume path")
+	//path, err := lv.Path()
+	//if err != nil {
+	//	return nil, status.Errorf(
+	//		codes.Internal,
+	//		"Error in Path(): err=%v",
+	//		err)
+	//}
+	//if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+	//	return nil, status.Errorf(
+	//		codes.Internal,
+	//		"The device path does not exist, cannot zero volume contents. To bypass the zeroing of the volume contents, ensure the file exists, or create it by hand, and reissue the DeleteVolume operation. path=%s",
+	//		path)
+	//}
+	// Removing feature to overwrite data since not mounted. This should be done with a K8s PV claim wiper.
+	//log.Printf("Deleting data on device %v", path)
+	//if err := deleteDataOnDevice(path); err != nil {
+	//	return nil, status.Errorf(
+	//		codes.Internal,
+	//		"Cannot delete data from device: err=%v",
+	//		err)
+	//}
 	log.Printf("Removing volume")
 	if err := lv.Remove(); err != nil {
 		return nil, status.Errorf(
@@ -1066,6 +1068,12 @@ func (s *Server) NodePublishVolume(
 			"Error in Path(): err=%v",
 			err)
 	}
+	if err := lv.Activate(); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"Failed to activate volume: err=%v",
+			err)
+	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
 	log.Printf("Target path is %v", targetPath)
@@ -1213,12 +1221,12 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 		// we return success.
 		return nil
 	} else {
-		// The CSI Plug in is required to create the target 
-		log.Printf("Creating Mount Target  %v ", targetPath)
-		if err := os.Mkdir(targetPath, 0755); err != nil {
+		// CO SHALL be responsible for creating the directory
+		log.Printf("Checking Mount Target  %v ", targetPath)
+		if _, err := os.Stat(targetPath); err != nil {
 			return status.Errorf(
 				codes.Internal,
-				"Cannot create mount target %v: err=%v",
+				"Mount target does not exists  %v: err=%v",
 				targetPath, err)
 		}
 	}
@@ -1321,7 +1329,7 @@ func (s *Server) NodeUnpublishVolume(
 	request *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	id := request.GetVolumeId()
 	log.Printf("Looking up volume with id=%v", id)
-	_, err := s.volumeGroup.LookupLogicalVolume(id)
+	lv, err := s.volumeGroup.LookupLogicalVolume(id)
 	if err != nil {
 		return nil, ErrVolumeNotFound
 	}
@@ -1357,13 +1365,11 @@ func (s *Server) NodeUnpublishVolume(
 			"Failed to perform unmount: err=%v",
 			err)
 	}
-	// The CSI Plug in is required to delete the mount target 
-	log.Printf("Deleting Mount Target  %v ", targetPath)
-	if err := os.RemoveAll(targetPath); err != nil {
+	if err := lv.Deactivate(); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Cannot delete  mount target %v: err=%v",
-			targetPath, err)
+			"Failed to de-activate volume: err=%v",
+			err)
 	}
 	response := &csi.NodeUnpublishVolumeResponse{}
 	return response, nil
@@ -1461,7 +1467,7 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 	if ok {
 		// Consume the 'type' key from the parameters.
 		delete(params, "type")
-		// We only support 'linear' and 'raid1' volume types at the moment.
+		// We only support 'linear' and 'raid1/10' volume types at the moment.
 		switch voltype {
 		case "linear":
 			layout.Type = lvm.VolumeTypeLinear
@@ -1476,8 +1482,33 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 				}
 				layout.Mirrors = mirrors
 			}
+			nosync, okns := params["nosync"]
+			if okns {
+				delete(params, "nosync")
+				if strings.ToLower(nosync)=="yes" || strings.ToLower(nosync) == "y" {
+					layout.Nosync = 1
+				}
+			}
+		case "raid10":
+			layout.Type = lvm.VolumeTypeRAID10
+			strps, ok := params["stripes"]
+			if ok {
+				delete(params, "stripes")
+				stripes, err := strconv.ParseUint(strps, 10, 64)
+				if err != nil || stripes < 1 {
+					return layout, fmt.Errorf("The 'stripes' parameter must be a positive integer: err=%v", err)
+				}
+				layout.Stripes = stripes
+			}
+			nosync, okns := params["nosync"]
+			if okns {
+				delete(params, "nosync")
+				if strings.ToLower(nosync)=="yes" || strings.ToLower(nosync) == "y" {
+					layout.Nosync = 1
+				}
+			}
 		default:
-			return layout, errors.New("The 'type' parameter must be one of 'linear' or 'raid1'.")
+			return layout, errors.New("The 'type' parameter must be one of 'linear', 'raid1' or 'raid10'.")
 		}
 	}
 	return layout, nil

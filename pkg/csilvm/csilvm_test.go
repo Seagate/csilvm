@@ -64,7 +64,7 @@ func testGetPluginInfoRequest() *csi.GetPluginInfoRequest {
 	return req
 }
 
-const pluginName = "io.mesosphere.csi.lvm"
+const pluginName = "datalake.speedboat.seagate.com"
 
 func TestGetPluginInfo(t *testing.T) {
 	vgname := testvgname()
