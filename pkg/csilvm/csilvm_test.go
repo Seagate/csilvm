@@ -24,8 +24,8 @@ import (
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
-	"github.com/mesosphere/csilvm/pkg/cleanup"
-	"github.com/mesosphere/csilvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/cleanup"
+	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/uber-go/tally"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

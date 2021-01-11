@@ -15,12 +15,12 @@ import (
 	"google.golang.org/grpc"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/mesosphere/csilvm/pkg/csilvm"
-	"github.com/mesosphere/csilvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/csilvm"
+	"github.com/Seagate/csiclvm/pkg/lvm"
 
 	datadogstatsd "github.com/DataDog/datadog-go/statsd"
 	"github.com/cactus/go-statsd-client/statsd"
-	"github.com/mesosphere/csilvm/pkg/ddstatsd"
+	"github.com/Seagate/csiclvm/pkg/ddstatsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 )

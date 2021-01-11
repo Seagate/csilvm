@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mesosphere/csilvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/uber-go/tally"
 	"google.golang.org/grpc"
 )

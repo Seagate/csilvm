@@ -1,7 +1,7 @@
 package version
 
 import (
-	"github.com/mesosphere/csilvm/pkg/version/internal/versiondata"
+	"github.com/Seagate/csiclvm/pkg/version/internal/versiondata"
 )
 
 type Version struct {

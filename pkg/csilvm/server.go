@@ -16,8 +16,8 @@ import (
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/mesosphere/csilvm/pkg/lvm"
-	"github.com/mesosphere/csilvm/pkg/version"
+	"github.com/Seagate/csiclvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/version"
 	"github.com/uber-go/tally"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/semaphore"

@@ -4,7 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/mesosphere/csilvm/pkg/cleanup"
+	"github.com/Seagate/csiclvm/pkg/cleanup"
 	losetup "gopkg.in/freddierice/go-losetup.v1"
 )
 

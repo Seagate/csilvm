@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/mesosphere/csilvm/pkg/cleanup"
+	"github.com/Seagate/csiclvm/pkg/cleanup"
 )
 
 const (
