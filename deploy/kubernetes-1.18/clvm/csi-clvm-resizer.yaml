@@ -1,0 +1,59 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: csi-clvm-resizer
+  labels:
+    app: csi-clvm-resizer
+spec:
+  selector:
+    app: csi-clvm-resizer
+  ports:
+    - name: dummy
+      port: 12345
+
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: csi-clvm-resizer
+spec:
+  serviceName: "csi-clvm-resizer"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: csi-clvm-resizer
+  template:
+    metadata:
+      labels:
+        app: csi-clvm-resizer
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - csi-clvmplugin
+            topologyKey: kubernetes.io/hostname
+      serviceAccountName: csi-resizer
+      containers:
+        - name: csi-resizer
+          image: quay.io/k8scsi/csi-resizer:v0.6.0-rc1
+          args:
+            - -v=5
+            - -csi-address=/csi/csi.sock
+          securityContext:
+            # This is necessary only for systems with SELinux, where
+            # non-privileged sidecar containers cannot access unix domain socket
+            # created by privileged CSI driver container.
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+      volumes:
+        - hostPath:
+            path: /var/lib/kubelet/plugins/csi-clvm
+            type: DirectoryOrCreate
+          name: socket-dir
