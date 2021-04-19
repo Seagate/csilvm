@@ -6,11 +6,11 @@ DOCKERFILE_MD5SUM=$(shell md5sum ./Dockerfile | cut -d" " -f1)
 DEV_DOCKER_IMAGE := csilvm_dev:$(DOCKERFILE_MD5SUM)
 
 PLUGIN_NAME ?= datalake.speedboat.seagate.com
-PLUGIN_VERSION ?= v0.6-dbg
+PLUGIN_VERSION ?= v0.7-dev
 BUILD_TIME ?= $(shell date +"%Y%m%dT%H%M%S.%N%z")
 PACKAGE_SHA ?= nosha
 
-PKG_ROOT := github.com/mesosphere/csilvm
+PKG_ROOT := github.com/Seagate/csiclvm
 
 LDFLAGS ?= \
        -X $(PKG_ROOT)/pkg/version/internal/versiondata.Product=$(PLUGIN_NAME) \
