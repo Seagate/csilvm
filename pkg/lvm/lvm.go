@@ -513,6 +513,10 @@ func RefreshMetaData(){
 	if err := PVScan(""); err != nil {
 		log.Printf("error during pvscan: %v", err)
 	}
+	if err := VGScan(""); err != nil {
+		log.Printf("error during vgscan: %v", err)
+	}
+
 }
 
 // ListLogicalVolumes returns the names of the logical volumes in this volume group.

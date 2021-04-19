@@ -2,7 +2,7 @@ package versiondata
 
 const (
 	defaultProduct = "datalake.speedboat.seagate.com"
-	defaultVersion = "v0-dev"
+	defaultVersion = "v0-dbg"
 )
 
 var (

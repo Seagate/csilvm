@@ -17,6 +17,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/Seagate/csiclvm/pkg/csilvm"
 	"github.com/Seagate/csiclvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/version"
 
 	datadogstatsd "github.com/DataDog/datadog-go/statsd"
 	"github.com/cactus/go-statsd-client/statsd"
@@ -73,6 +74,7 @@ func main() {
 	statsdUDPPortEnvVarF := flag.String("statsd-udp-port-env-var", "", "The name of the environment variable containing the port where a statsd service is listening for stats over UDP")
 	statsdFormatF := flag.String("statsd-format", "datadog", "The statsd format to use (one of: classic, datadog)")
 	statsdMaxUDPSizeF := flag.Int("statsd-max-udp-size", 1432, "The size to buffer before transmitting a statsd UDP packet")
+	flag.String("build-version", "", version.Get().Version)
 	flag.Parse()
 	// Setup logging
 	logprefix := fmt.Sprintf("[%s]", *vgnameF)

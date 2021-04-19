@@ -1222,12 +1222,16 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 		return nil
 	} else {
 		// CO SHALL be responsible for creating the directory
+		// Creation of target_path is the responsibility of the SP.
 		log.Printf("Checking Mount Target  %v ", targetPath)
 		if _, err := os.Stat(targetPath); err != nil {
-			return status.Errorf(
-				codes.Internal,
-				"Mount target does not exists  %v: err=%v",
-				targetPath, err)
+			log.Printf("Creating Mount Target  %v ", targetPath)
+			if err := os.Mkdir(targetPath, 0755); err != nil {
+				return status.Errorf(
+					codes.Internal,
+					"Cannot create mount target %v: err=%v",
+					targetPath, err)
+			}
 		}
 	}
 
