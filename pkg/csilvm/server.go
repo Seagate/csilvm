@@ -37,6 +37,7 @@ type Server struct {
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
 	removingVolumeGroup  bool
+	ovirtController      bool
 	tags                 []string
 	probeModules         map[string]struct{}
 	nodeID               string
@@ -93,6 +94,10 @@ func (s *Server) RemovingVolumeGroup() bool {
 	return s.removingVolumeGroup
 }
 
+func (s *Server) OvirtController() bool {
+	return s.ovirtController
+}
+
 type ServerOpt func(*Server)
 
 func NodeID(nid string) ServerOpt {
@@ -126,6 +131,14 @@ func SupportedFilesystem(fstype string) ServerOpt {
 func RemoveVolumeGroup() ServerOpt {
 	return func(s *Server) {
 		s.removingVolumeGroup = true
+	}
+}
+
+// OvirtController configures the Server to operate as a CSI Controller
+// running on a oVirt or Red Hat Virtulization Host.
+func OvirtController() ServerOpt {
+	return func(s *Server) {
+		s.ovirtController = true
 	}
 }
 
@@ -764,12 +777,52 @@ func deleteDataOnDevice(devicePath string) error {
 }
 
 var ErrCallNotImplemented = status.Error(codes.Unimplemented, "That RPC is not implemented.")
+var ErrCallUnknownNodeId = status.Error(codes.Unimplemented, "Unknown nodeid doesn't map to oVirt DOM.")
 
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
 	request *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	log.Printf("ControllerPublishVolume not supported")
-	return nil, ErrCallNotImplemented
+	if ! s.ovirtController {
+		log.Printf("ControllerPublishVolume not supported")
+		return nil, ErrCallNotImplemented
+	}
+	volid := request.GetVolumeId()
+	log.Printf("ControllerPublishVolume, Looking up volume with id=%v", volid)
+	lv, err := s.volumeGroup.LookupLogicalVolume(volid)
+	if err != nil {
+		return nil, ErrVolumeNotFound
+	}
+	nodeid := request.GetNodeId()
+	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeid)
+	//Validate Domain Name
+	if !virsh.IsDomValid(nodeid) {
+		return nil, ErrCallUnknownNodeId
+	}
+	// Define virsh pool if it does not exist
+	if !virsh.IsPoolVaild(s.volumeGroup.name){
+		err = virsh.DefinePool(s.volumeGroup.name)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n",s.volumeGroup.name,err)
+			return nil, status.Error(codes.Internal,msg)
+		}
+	}
+	virsh.StartPool(s.volumeGroup.name)
+	volpath, err := VolPath(s.volumeGroup.name, volid )
+	if err != nil {
+		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n",s.volumeGroup.name,err)
+		return nil, status.Error(codes.Internal,msg)
+	}
+	// Perform Mapping of lv in to VM
+	err =AttachDisk(nodeid, volpath)
+	if err != nil {
+		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n",s.volumeGroup.name,volid,err)
+		return nil, status.Error(codes.Internal,msg)
+	}
+
+
+
+// TRP WORKING HERE
+
 }
 
 func (s *Server) ControllerUnpublishVolume(

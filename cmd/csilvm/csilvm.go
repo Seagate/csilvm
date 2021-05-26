@@ -69,6 +69,7 @@ func main() {
 	flag.Var(&probeModulesF, "probe-module", "Probe checks that the kernel module is loaded")
 	nodeIDF := flag.String("node-id", "", "The node ID reported via the CSI Node gRPC service")
 	lockFilePathF := flag.String("lockfile", defaultLockfilePathOrEnv(), "The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances")
+	ovirtF := flag.Bool("ovirt-controler", false, "Set when running as a Controller Agent on a oVirt or RHV hypervisor. ")
 	// Metrics-related flags
 	statsdUDPHostEnvVarF := flag.String("statsd-udp-host-env-var", "", "The name of the environment variable containing the host where a statsd service is listening for stats over UDP")
 	statsdUDPPortEnvVarF := flag.String("statsd-udp-port-env-var", "", "The name of the environment variable containing the port where a statsd service is listening for stats over UDP")
@@ -202,6 +203,10 @@ func main() {
 	)
 	if *removeF {
 		opts = append(opts, csilvm.RemoveVolumeGroup())
+	}
+	if *ovirtF {
+		opts = append(opts, csilvm.OvirtController())
+		logger.Printf("INFO: Starting as oVirt Controller Agent.")
 	}
 	for _, tag := range tagsF {
 		opts = append(opts, csilvm.Tag(tag))
