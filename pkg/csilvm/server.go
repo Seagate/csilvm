@@ -15,9 +15,9 @@ import (
 	"strings"
 	"syscall"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/Seagate/csiclvm/pkg/version"
+	csi "github.com/container-storage-inter"
+	csi "github.com/container-storage-interface/spec/lib/go/csiface/spec/lib/go/csi"
 	"github.com/uber-go/tally"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/semaphore"
@@ -782,7 +782,7 @@ var ErrCallUnknownNodeId = status.Error(codes.Unimplemented, "Unknown nodeid doe
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
 	request *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	if ! s.ovirtController {
+	if !s.ovirtController {
 		log.Printf("ControllerPublishVolume not supported")
 		return nil, ErrCallNotImplemented
 	}
@@ -799,6 +799,54 @@ func (s *Server) ControllerPublishVolume(
 		return nil, ErrCallUnknownNodeId
 	}
 	// Define virsh pool if it does not exist
+	if !virsh.IsPoolVaild(s.volumeGroup.name) {
+		err = virsh.DefinePool(s.volumeGroup.name)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.volumeGroup.name, err)
+			return nil, status.Error(codes.Internal, msg)
+		}
+	}
+	virsh.StartPool(s.volumeGroup.name)
+	volpath, err := VolPath(s.volumeGroup.name, volid)
+	if err != nil {
+		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n", s.volumeGroup.name, err)
+		return nil, status.Error(codes.Internal, msg)
+	}
+	blkID,err2 := virsh.BlkID(volpath)
+	if er r != nil {
+		msg := fmt.Sprintf("Failed to Fetch BlkID\n%v\n",err)
+		return nil, status.Error(codes.Internal,msg)   
+	} 
+	// Perform Mapping of lv in to VM
+	err =AttachDisk(nodeid, volpath)
+			return nil, status.Error(codes.Internal,msg)
+	}
+	response := &csi.ControllerPublishVolumeResponse{
+		VolumeId:   volumeID,
+		blkid:      blkID
+	}
+	return response, nil
+}
+
+
+func (s *Server) ControllerUnpublishVolume(
+	ctx context.Context,
+	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+	if ! s.ovirtController {
+		log.Printf("ControllerPublishVolume not supported")
+		return nil, ErrCallNotImplemented
+	}
+	//Validate Domain Name
+	nodeid := request.GetNodeId()
+	if !virsh.IsDomValid(nodeid) {
+		return nil, ErrCallUnknownNodeId
+	}
+	volid := request.GetVolumeId()
+	lv, err := s.volumeGroup.LookupLogicalVolume(volid)
+	if err != nil {
+		return nil, ErrVolumeNotFound
+	}
+	// Define virsh pool if it does not exist
 	if !virsh.IsPoolVaild(s.volumeGroup.name){
 		err = virsh.DefinePool(s.volumeGroup.name)
 		if err != nil {
@@ -806,35 +854,26 @@ func (s *Server) ControllerPublishVolume(
 			return nil, status.Error(codes.Internal,msg)
 		}
 	}
-	virsh.StartPool(s.volumeGroup.name)
+	// Assume pool is started.  Skipping virsh.StartPool(s.volumeGroup.name)
 	volpath, err := VolPath(s.volumeGroup.name, volid )
 	if err != nil {
-		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n",s.volumeGroup.name,err)
-		return nil, status.Error(codes.Internal,msg)
+		err := virsh.DetachDisk(noddid,volpath)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n",volpath,err)
+			return nil, status.Error(codes.Internal,msg)
+		}
 	}
-	// Perform Mapping of lv in to VM
-	err =AttachDisk(nodeid, volpath)
-	if err != nil {
-		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n",s.volumeGroup.name,volid,err)
-		return nil, status.Error(codes.Internal,msg)
-	}
-
-
-
+	response := &csi.ControllerUnpublishVolumeResponse{}
+	return response, nil
 // TRP WORKING HERE
 
 }
 
-func (s *Server) ControllerUnpublishVolume(
-	ctx context.Context,
-	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
-	log.Printf("ControllerUnpublishVolume not supported")
-	return nil, ErrCallNotImplemented
-}
+
 
 var ErrMismatchedFilesystemType = status.Error(
 	codes.InvalidArgument,
-	"The requested fs_type does not match the existing filesystem on the volume.")
+	"The requeed fs_type does not match the existing filesystem on the volume.")
 
 func (s *Server) ValidateVolumeCapabilities(
 	ctx context.Context,
@@ -875,7 +914,7 @@ func (s *Server) ValidateVolumeCapabilities(
 	}
 	response := &csi.ValidateVolumeCapabilitiesResponse{
 		// TODO: Add optional Confirmed field
-		Message:   "",
+		Mesage:   "",
 	}
 	return response, nil
 }
@@ -1005,7 +1044,6 @@ func (s *Server) ControllerGetCapabilities(
 				},
 			},
 		},
-		// PUBLISH_UNPUBLISH_VOLUME
 		//
 		//     Not supported by Controller service. This is
 		//     performed by the Node service for the Logical
@@ -1029,7 +1067,6 @@ func (s *Server) ControllerGetCapabilities(
 		},
 	}
 	response := &csi.ControllerGetCapabilitiesResponse{Capabilities: capabilities}
-	return response, nil
 }
 
 func (s *Server) CreateSnapshot(
@@ -1151,7 +1188,7 @@ func (s *Server) NodePublishVolume(
 	return response, nil
 }
 
-func (s *Server) nodePublishVolume_Block(sourcePath, targetPath string, readonly bool) error {
+func (s *Server) nodePublishVolume_Block(sourcePath, argetPath string, readonly bool) error {
 	log.Printf("Attempting to publish volume %v as BLOCK_DEVICE to %v", sourcePath, targetPath)
 	log.Printf("Determining mount info at %v", targetPath)
 	// Check whether something is already mounted at targetPath.
@@ -1391,7 +1428,6 @@ func (s *Server) NodeUnpublishVolume(
 		return nil, ErrVolumeNotFound
 	}
 	targetPath := request.GetTargetPath()
-	log.Printf("Determining mount info at %v", targetPath)
 	mp, err := getMountAt(targetPath)
 	if err != nil {
 		return nil, status.Errorf(
@@ -1501,7 +1537,7 @@ func (s *Server) checkVolumeGroupTags(tags []string) error {
 		for _, t2 := range s.tags {
 			if t1 == t2 {
 				had = true
-				break
+				break  
 			}
 		}
 		if !had {
@@ -1519,7 +1555,7 @@ func (s *Server) NodeGetCapabilities(
 }
 
 // takeVolumeLayoutFromParameters removes and returns RAID-related parameters from the input.
-func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.VolumeLayout, err error) {
+func takeVolumeLayoutFromParam et ers(params map[string]string) (layout lvm.VolumeLayout, err error) {
 	voltype, ok := params["type"]
 	if ok {
 		// Consume the 'type' key from the parameters.

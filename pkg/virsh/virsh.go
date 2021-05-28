@@ -60,7 +60,6 @@ type vmblkmap struct {
 	vmname	string
 	vdblk	string
 	lvsrc	string
-	blkid	string
 }
 
 
@@ -118,7 +117,6 @@ func ListVMblks(vmname string) (mappings []vmblkmap) {
 		blkmap.vmname = vmname
 		blkmap.vdblk = words[0]
 		blkmap.lvsrc = words[1]
-		blkmap.blkid =  "TBD"
 		mappings = append(mappings,blkmap)
 	}
 	//fmt.Printf("MAPPING For %s  %v\n", vmname, mappings)
@@ -340,6 +338,24 @@ func UnMapVMBlkDevs(dom string) {
 	}
 }
 
+func BlkID(blkdev string) (string, error ){
+	cmd := exec.Command("blkid", "-po","udev", blkdev)
+        out, err := cmd.CombinedOutput()
+	if err != nil {
+		return  nil , errors.New("Can't find block device on host")
+	}
+  
+	lines := strings.Split(out.String(), "\n")
+	for _, ln := range lines {
+		chunks := strings.Split(ln, "=")
+		if len(chunks) == 2 {
+			if chunks[0] == "ID_FS_UUID" {
+				return chunks[1] , nil
+			}
+		}
+	}
+	return  nil , errors.New("Can't find blockid device on host")
+}
 
 
 func main() {

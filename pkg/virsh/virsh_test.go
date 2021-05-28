@@ -34,6 +34,9 @@ func TestListPools(t *testing.T) {
 
 	DefinePool(vg) 
 	if ! IsPoolValid(vg) { t.Errorf("Failed to define %s",vg) }
+	if StartPool(vg) != nil {
+		t.Errorf("Failed to Start pool %s ",vg)
+	}
 
 }
 
