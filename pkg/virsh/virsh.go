@@ -1,7 +1,8 @@
 // Copyright (C) 2021 Seagate Technology LLC and/or its Affiliates.
 // SPDX-License-Identifier: LGPL-2.1-only
 
-// This file abstracts the virsh operations of oVirt and Red Hat Virtualization
+// These functions provide a LVM2 and virsh control through a mercury proxy 
+// running on the ovirt host or Red Hat Virtualization host
 // See: https://linux.die.net/man/1/virsh
 
 
@@ -12,10 +13,14 @@ import (
     "fmt"
     //"log"
     "encoding/xml"
+    "encoding/json"
     "strings"
     "errors"
+    "log"
     "os"
     "io/ioutil"
+    "net/http"
+
 )
 
 type basicError string
@@ -61,6 +66,69 @@ type vmblkmap struct {
 	vdblk	string
 	lvsrc	string
 }
+
+
+type mercinfo struct {
+	Api		string `json:"api"`
+	Cluster		string `json:"cluster"`
+	Registered	string `json:"registered"`
+	Seachest	string `json:"seachest"`
+	Server		string `json:"server"`
+	Version		string `json:"version"`
+}
+
+
+func HostConfig(ip string) (mercinfo, error) {
+   	var info mercinfo
+	resp, err := http.Get("http://"+ip+":3141/")
+	if err != nil {
+		return info, err
+	}
+	jbytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return info, err2
+	}
+	json.Unmarshal(jbytes,&info)
+	return info, nil
+}
+
+
+
+// FIXME Not Used yet
+type vginfo struct {
+	FreeBytes	string `json:"FreeBytes"`
+	LVCount		string `json:"LVCount"`
+	PartCount	string `json:"PartCount"`
+	UsedBytes	string `json:"UsedBytes"`
+	CsiStatus	string `json:"csistatus"`
+	VgLock		string `json:"vglock"`
+	vgroup		string `json:"vgroup"`
+}
+
+
+func LookupVolumeGroup(vg, ip string ) ( string, error ) {
+	if vg[0:5] != "sbvg_" {
+		return "", fmt.Errorf("Not Valid Speedboat Volume Group %s\n", vg)
+	}
+	get, err := http.Get("http://"+ip+":3141/speedboat/tenant/join?tenantname="+vg[5:])
+	if err != nil {
+		return "", err
+	}
+	//log.Printf("GET: %+v", get)
+	if get.StatusCode != 200  {
+		return "", fmt.Errorf("Tenant Join Failed")
+	}
+	
+	jbytes, err2 := ioutil.ReadAll(get.Body)
+	if err2 != nil {
+		return "", err2
+	}
+	log.Printf("%s", jbytes)
+	//found.name =  vg 
+	return vg, nil
+}
+
+
 
 
 // Test if virtual machine exists
@@ -342,10 +410,10 @@ func BlkID(blkdev string) (string, error ){
 	cmd := exec.Command("blkid", "-po","udev", blkdev)
         out, err := cmd.CombinedOutput()
 	if err != nil {
-		return  nil , errors.New("Can't find block device on host")
+		return  "" , errors.New("Can't find block device on host")
 	}
   
-	lines := strings.Split(out.String(), "\n")
+	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		chunks := strings.Split(ln, "=")
 		if len(chunks) == 2 {
@@ -354,7 +422,7 @@ func BlkID(blkdev string) (string, error ){
 			}
 		}
 	}
-	return  nil , errors.New("Can't find blockid device on host")
+	return  "" , errors.New("Can't find blockid device on host")
 }
 
 

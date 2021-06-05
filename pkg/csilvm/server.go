@@ -15,9 +15,10 @@ import (
 	"strings"
 	"syscall"
 
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/Seagate/csiclvm/pkg/lvm"
+	"github.com/Seagate/csiclvm/pkg/virsh"
 	"github.com/Seagate/csiclvm/pkg/version"
-	csi "github.com/container-storage-inter"
-	csi "github.com/container-storage-interface/spec/lib/go/csiface/spec/lib/go/csi"
 	"github.com/uber-go/tally"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/semaphore"
@@ -37,7 +38,7 @@ type Server struct {
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
 	removingVolumeGroup  bool
-	ovirtController      bool
+	ovirtHost	     string
 	tags                 []string
 	probeModules         map[string]struct{}
 	nodeID               string
@@ -49,7 +50,7 @@ type Server struct {
 // default options can be overwritten. The Setup method must be called before
 // any other further method calls are performed in order to setup/remove the
 // volume group.
-func NewServer(vgname string, pvnames []string, defaultFs string, opts ...ServerOpt) *Server {
+func NewServer(vgname string, pvnames []string, defaultFs string, ovirthost string, opts ...ServerOpt) *Server {
 	const (
 		// Unless overwritten by the DefaultVolumeSize
 		// ServerOpt the default size for new volumes is
@@ -64,6 +65,7 @@ func NewServer(vgname string, pvnames []string, defaultFs string, opts ...Server
 			"":        defaultFs,
 			defaultFs: defaultFs,
 		},
+		ovirtHost:	   ovirthost,
 		metrics: tally.NoopScope,
 	}
 	for _, opt := range opts {
@@ -94,8 +96,8 @@ func (s *Server) RemovingVolumeGroup() bool {
 	return s.removingVolumeGroup
 }
 
-func (s *Server) OvirtController() bool {
-	return s.ovirtController
+func (s *Server) OvirtHost() string {
+	return s.ovirtHost
 }
 
 type ServerOpt func(*Server)
@@ -131,14 +133,6 @@ func SupportedFilesystem(fstype string) ServerOpt {
 func RemoveVolumeGroup() ServerOpt {
 	return func(s *Server) {
 		s.removingVolumeGroup = true
-	}
-}
-
-// OvirtController configures the Server to operate as a CSI Controller
-// running on a oVirt or Red Hat Virtulization Host.
-func OvirtController() ServerOpt {
-	return func(s *Server) {
-		s.ovirtController = true
 	}
 }
 
@@ -192,7 +186,22 @@ func (s *Server) Setup() error {
 		}
 	}
 	log.Printf("Looking up volume group %v", s.vgname)
-	volumeGroup, err := lvm.LookupVolumeGroup(s.vgname)
+	var volumeGroup *lvm.VolumeGroup
+	var err error
+	if s.ovirtHost == "none" {
+		volumeGroup, err = lvm.LookupVolumeGroup(s.vgname)
+	} else {
+		mercinfo,merr := virsh.HostConfig(s.ovirtHost)
+		if merr != nil {
+			return fmt.Errorf("Cannot connect to Mercury service on %s\n%v", s.ovirtHost,merr)
+		}else {
+			_, lerr := virsh.LookupVolumeGroup(s.vgname,s.ovirtHost)
+			if lerr != nil {
+				return fmt.Errorf("Cannot Find %s on ovirt host\n%v", s.vgname,lerr)
+			}
+			log.Printf("Mercury service %v\n", mercinfo)
+		}
+	}
 	if err == lvm.ErrVolumeGroupNotFound {
 		if s.removingVolumeGroup {
 			// We've been instructed to remove the volume
@@ -782,91 +791,16 @@ var ErrCallUnknownNodeId = status.Error(codes.Unimplemented, "Unknown nodeid doe
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
 	request *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	if !s.ovirtController {
-		log.Printf("ControllerPublishVolume not supported")
-		return nil, ErrCallNotImplemented
-	}
-	volid := request.GetVolumeId()
-	log.Printf("ControllerPublishVolume, Looking up volume with id=%v", volid)
-	lv, err := s.volumeGroup.LookupLogicalVolume(volid)
-	if err != nil {
-		return nil, ErrVolumeNotFound
-	}
-	nodeid := request.GetNodeId()
-	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeid)
-	//Validate Domain Name
-	if !virsh.IsDomValid(nodeid) {
-		return nil, ErrCallUnknownNodeId
-	}
-	// Define virsh pool if it does not exist
-	if !virsh.IsPoolVaild(s.volumeGroup.name) {
-		err = virsh.DefinePool(s.volumeGroup.name)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.volumeGroup.name, err)
-			return nil, status.Error(codes.Internal, msg)
-		}
-	}
-	virsh.StartPool(s.volumeGroup.name)
-	volpath, err := VolPath(s.volumeGroup.name, volid)
-	if err != nil {
-		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n", s.volumeGroup.name, err)
-		return nil, status.Error(codes.Internal, msg)
-	}
-	blkID,err2 := virsh.BlkID(volpath)
-	if er r != nil {
-		msg := fmt.Sprintf("Failed to Fetch BlkID\n%v\n",err)
-		return nil, status.Error(codes.Internal,msg)   
-	} 
-	// Perform Mapping of lv in to VM
-	err =AttachDisk(nodeid, volpath)
-			return nil, status.Error(codes.Internal,msg)
-	}
-	response := &csi.ControllerPublishVolumeResponse{
-		VolumeId:   volumeID,
-		blkid:      blkID
-	}
-	return response, nil
+	log.Printf("ControllerPublishVolume not supported")
+	return nil, ErrCallNotImplemented
 }
 
 
 func (s *Server) ControllerUnpublishVolume(
 	ctx context.Context,
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
-	if ! s.ovirtController {
-		log.Printf("ControllerPublishVolume not supported")
-		return nil, ErrCallNotImplemented
-	}
-	//Validate Domain Name
-	nodeid := request.GetNodeId()
-	if !virsh.IsDomValid(nodeid) {
-		return nil, ErrCallUnknownNodeId
-	}
-	volid := request.GetVolumeId()
-	lv, err := s.volumeGroup.LookupLogicalVolume(volid)
-	if err != nil {
-		return nil, ErrVolumeNotFound
-	}
-	// Define virsh pool if it does not exist
-	if !virsh.IsPoolVaild(s.volumeGroup.name){
-		err = virsh.DefinePool(s.volumeGroup.name)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n",s.volumeGroup.name,err)
-			return nil, status.Error(codes.Internal,msg)
-		}
-	}
-	// Assume pool is started.  Skipping virsh.StartPool(s.volumeGroup.name)
-	volpath, err := VolPath(s.volumeGroup.name, volid )
-	if err != nil {
-		err := virsh.DetachDisk(noddid,volpath)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n",volpath,err)
-			return nil, status.Error(codes.Internal,msg)
-		}
-	}
-	response := &csi.ControllerUnpublishVolumeResponse{}
-	return response, nil
-// TRP WORKING HERE
-
+	log.Printf("ControllerUnPublishVolume not supported")
+	return nil, ErrCallNotImplemented
 }
 
 
@@ -914,7 +848,7 @@ func (s *Server) ValidateVolumeCapabilities(
 	}
 	response := &csi.ValidateVolumeCapabilitiesResponse{
 		// TODO: Add optional Confirmed field
-		Mesage:   "",
+		Message:   "",
 	}
 	return response, nil
 }
@@ -1067,6 +1001,7 @@ func (s *Server) ControllerGetCapabilities(
 		},
 	}
 	response := &csi.ControllerGetCapabilitiesResponse{Capabilities: capabilities}
+	return response, nil
 }
 
 func (s *Server) CreateSnapshot(
@@ -1188,7 +1123,7 @@ func (s *Server) NodePublishVolume(
 	return response, nil
 }
 
-func (s *Server) nodePublishVolume_Block(sourcePath, argetPath string, readonly bool) error {
+func (s *Server) nodePublishVolume_Block(sourcePath, targetPath string, readonly bool) error {
 	log.Printf("Attempting to publish volume %v as BLOCK_DEVICE to %v", sourcePath, targetPath)
 	log.Printf("Determining mount info at %v", targetPath)
 	// Check whether something is already mounted at targetPath.
@@ -1555,7 +1490,7 @@ func (s *Server) NodeGetCapabilities(
 }
 
 // takeVolumeLayoutFromParameters removes and returns RAID-related parameters from the input.
-func takeVolumeLayoutFromParam et ers(params map[string]string) (layout lvm.VolumeLayout, err error) {
+func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.VolumeLayout, err error) {
 	voltype, ok := params["type"]
 	if ok {
 		// Consume the 'type' key from the parameters.
