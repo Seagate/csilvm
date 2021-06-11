@@ -1,30 +1,35 @@
 // Copyright (C) 2021 Seagate Technology LLC and/or its Affiliates.
 // SPDX-License-Identifier: LGPL-2.1-only
 
-// These functions provide a LVM2 and virsh control through a mercury proxy 
+// These functions provide a LVM2 and virsh control through a mercury proxy
 // running on the ovirt host or Red Hat Virtualization host
 // See: https://linux.die.net/man/1/virsh
-
 
 package virsh
 
 import (
-    "os/exec"
-    "fmt"
-    //"log"
-    "encoding/xml"
-    "encoding/json"
-    "strings"
-    "errors"
-    "log"
-    "os"
-    "io/ioutil"
-    "net/http"
+	"fmt"
+	"os/exec"
 
+	//"log"
+	"encoding/json"
+	"encoding/xml"
+	"errors"
+	"io/ioutil"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strings"
 )
 
+// Global variable for the oVirt Host IP Address
+var HostIP string
+
 type basicError string
+
 func (s basicError) Error() string { return string(s) }
+
 const ErrDomNotFound = basicError("virsh: domain not found")
 
 // virsh Pool Dump Struct
@@ -60,27 +65,24 @@ type Pool struct {
 	} `xml:"target"`
 }
 
-
 type vmblkmap struct {
-	vmname	string
-	vdblk	string
-	lvsrc	string
+	vmname string
+	vdblk  string
+	lvsrc  string
 }
-
 
 type mercinfo struct {
-	Api		string `json:"api"`
-	Cluster		string `json:"cluster"`
-	Registered	string `json:"registered"`
-	Seachest	string `json:"seachest"`
-	Server		string `json:"server"`
-	Version		string `json:"version"`
+	Api        string `json:"api"`
+	Cluster    string `json:"cluster"`
+	Registered string `json:"registered"`
+	Seachest   string `json:"seachest"`
+	Server     string `json:"server"`
+	Version    string `json:"version"`
 }
 
-
 func HostConfig(ip string) (mercinfo, error) {
-   	var info mercinfo
-	resp, err := http.Get("http://"+ip+":3141/")
+	var info mercinfo
+	resp, err := http.Get("http://" + ip + ":3141/")
 	if err != nil {
 		return info, err
 	}
@@ -88,54 +90,91 @@ func HostConfig(ip string) (mercinfo, error) {
 	if err2 != nil {
 		return info, err2
 	}
-	json.Unmarshal(jbytes,&info)
+	json.Unmarshal(jbytes, &info)
 	return info, nil
 }
 
+// Function makes LVM call through Mercury Agent on oVrit Host
+func ProxyRun(cmd string, args ...string) ([]byte, error) {
+	runargs := ""
+	for _, arg := range args {
+		// Assume tilda is a save delimeter
+		runargs += arg + "~"
+	}
+	runargs = strings.TrimSuffix(runargs, "~")
+	url := "http://" + HostIP + ":3141/speedboat/lvm/run?lvmcmd=" + cmd + "&lvmargs=" + runargs
+	log.Printf("GET: %s\n", url)
+	//resp, err := http.Get("http://" + HostIP + ":3141/speedboat/virsh/run?lvmcmd=" + cmd + "&lvmargs=" + runargs)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return nil, err
+	}
+	jbytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return nil, err2
+	}
+	return jbytes, nil
+}
 
+func SetHostIP(ip string) bool {
+	if net.ParseIP(ip) != nil {
+		HostIP = ip
+		return true
+	}
+	HostIP = ""
+	return false
+}
+
+func OvirtIP() string {
+	return HostIP
+}
+
+func ProxyMode() bool {
+	if HostIP == "" {
+		return false
+	}
+	return true
+}
 
 // FIXME Not Used yet
 type vginfo struct {
-	FreeBytes	string `json:"FreeBytes"`
-	LVCount		string `json:"LVCount"`
-	PartCount	string `json:"PartCount"`
-	UsedBytes	string `json:"UsedBytes"`
-	CsiStatus	string `json:"csistatus"`
-	VgLock		string `json:"vglock"`
-	vgroup		string `json:"vgroup"`
+	FreeBytes string `json:"FreeBytes"`
+	LVCount   string `json:"LVCount"`
+	PartCount string `json:"PartCount"`
+	UsedBytes string `json:"UsedBytes"`
+	CsiStatus string `json:"csistatus"`
+	VgLock    string `json:"vglock"`
+	vgroup    string `json:"vgroup"`
 }
 
-
-func LookupVolumeGroup(vg, ip string ) ( string, error ) {
+func LookupVolumeGroup(vg, ip string) (string, error) {
 	if vg[0:5] != "sbvg_" {
 		return "", fmt.Errorf("Not Valid Speedboat Volume Group %s\n", vg)
 	}
-	get, err := http.Get("http://"+ip+":3141/speedboat/tenant/join?tenantname="+vg[5:])
+	get, err := http.Get("http://" + ip + ":3141/speedboat/tenant/join?tenantname=" + vg[5:])
 	if err != nil {
 		return "", err
 	}
 	//log.Printf("GET: %+v", get)
-	if get.StatusCode != 200  {
+	if get.StatusCode != 200 {
 		return "", fmt.Errorf("Tenant Join Failed")
 	}
-	
+
 	jbytes, err2 := ioutil.ReadAll(get.Body)
 	if err2 != nil {
 		return "", err2
 	}
 	log.Printf("%s", jbytes)
-	//found.name =  vg 
+	//found.name =  vg
 	return vg, nil
 }
-
-
-
 
 // Test if virtual machine exists
 func IsDomValid(dom string) bool {
 	cmd := exec.Command("virsh", "domid", dom)
-        _, err := cmd.CombinedOutput()
-	if (err == nil){
+	_, err := cmd.CombinedOutput()
+	if err == nil {
 		return true
 	}
 	return false
@@ -144,14 +183,12 @@ func IsDomValid(dom string) bool {
 // Test if storage pool exists
 func IsPoolValid(pool string) bool {
 	cmd := exec.Command("virsh", "pool-uuid", pool)
-        _, err := cmd.CombinedOutput()
-	if (err == nil){
+	_, err := cmd.CombinedOutput()
+	if err == nil {
 		return true
 	}
 	return false
 }
-
-
 
 //List Virtual Machines
 func ListVMs() (vms []string) {
@@ -160,14 +197,17 @@ func ListVMs() (vms []string) {
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
-		if len(words)<3  { continue }
-		if words[0] == "Id" { continue }
+		if len(words) < 3 {
+			continue
+		}
+		if words[0] == "Id" {
+			continue
+		}
 		vms = append(vms, words[1])
 	}
 	fmt.Printf("VMS %v\n", vms)
 	return vms
 }
-
 
 //List VM's Speedboat Blk Devices
 func ListVMblks(vmname string) (mappings []vmblkmap) {
@@ -176,61 +216,73 @@ func ListVMblks(vmname string) (mappings []vmblkmap) {
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
-		if len(words)<2  { continue }
-		if words[0] == "Target" { continue }
+		if len(words) < 2 {
+			continue
+		}
+		if words[0] == "Target" {
+			continue
+		}
 		// Only list Speedboat VGs
-		if len(words[1])<11  { continue }
-		if (words[1][0:10] != "/dev/sbvg_")  { continue }
+		if len(words[1]) < 11 {
+			continue
+		}
+		if words[1][0:10] != "/dev/sbvg_" {
+			continue
+		}
 		var blkmap vmblkmap
 		blkmap.vmname = vmname
 		blkmap.vdblk = words[0]
 		blkmap.lvsrc = words[1]
-		mappings = append(mappings,blkmap)
+		mappings = append(mappings, blkmap)
 	}
 	//fmt.Printf("MAPPING For %s  %v\n", vmname, mappings)
 	return mappings
 }
 
-
 //List Virsh Pools
 func ListMappings() (mappings []vmblkmap) {
 	vms := ListVMs()
-	for _,vm := range vms {
+	for _, vm := range vms {
 		vmblkmap := ListVMblks(vm)
 		mappings = append(mappings, vmblkmap...)
 	}
 	return mappings
 }
 
-
-
-func virshcmd(args []string) ([]byte) {
+func virshcmd(args []string) []byte {
 	cmdb := "virsh"
 	cmd := exec.Command(cmdb, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("INFO Error running  %+v\n %+v\n",cmd,err)
+		fmt.Printf("INFO Error running  %+v\n %+v\n", cmd, err)
 	}
 	return out
 }
 
 //List Virsh Pools
 func ListAllPools() (pools []string) {
-	args := []string{"pool-list","--all"}
+	args := []string{"pool-list", "--all"}
 	out := virshcmd(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
-		if len(words)<2  { continue }
-		if words[0] == "Name" { continue }
-		if len(words[0])<5  { continue }
-		if (words[0][0:5] != "sbvg_")  { continue }
+		if len(words) < 2 {
+			continue
+		}
+		if words[0] == "Name" {
+			continue
+		}
+		if len(words[0]) < 5 {
+			continue
+		}
+		if words[0][0:5] != "sbvg_" {
+			continue
+		}
 		pools = append(pools, words[0])
 	}
 	//fmt.Printf("POOLS %v\n", pools)
 	return pools
 }
-
 
 //List Virsh Pools
 func ListPools() (pools []string) {
@@ -239,48 +291,59 @@ func ListPools() (pools []string) {
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
-		if len(words)<2  { continue }
-		if words[0] == "Name" { continue }
-		if len(words[0])<5  { continue }
-		if (words[0][0:5] != "sbvg_")  { continue }
+		if len(words) < 2 {
+			continue
+		}
+		if words[0] == "Name" {
+			continue
+		}
+		if len(words[0]) < 5 {
+			continue
+		}
+		if words[0][0:5] != "sbvg_" {
+			continue
+		}
 		pools = append(pools, words[0])
 	}
 	//fmt.Printf("POOLS %v\n", pools)
 	return pools
 }
 
-
 //List Virsh Volumes on Hypervisor
-func ListHyprVols(pool string) (map[string]string) {
-	vols := make(map[string]string) 
-	args := []string{"vol-list",pool}
+func ListHyprVols(pool string) map[string]string {
+	vols := make(map[string]string)
+	args := []string{"vol-list", pool}
 	out := virshcmd(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
-		if len(words)<2  { continue }
-		if words[0] == "Name" { continue }
-		if len(words[0])<2  { continue }
+		if len(words) < 2 {
+			continue
+		}
+		if words[0] == "Name" {
+			continue
+		}
+		if len(words[0]) < 2 {
+			continue
+		}
 		vols[words[0]] = words[1]
 	}
 	return vols
 }
 
-func VolPath(pool, vol string) (string, error){
-	args := []string{"vol-path","--pool",pool,vol}
+func VolPath(pool, vol string) (string, error) {
+	args := []string{"vol-path", "--pool", pool, vol}
 	cmd := exec.Command("virsh", args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-
 func UnMapAllDomains() {
 	vms := ListVMs()
-	for _,vm := range vms {
+	for _, vm := range vms {
 		UnMapVMBlkDevs(vm)
 	}
 }
-
 
 func DisplayVols(vols map[string]string) {
 	for name, _ := range vols {
@@ -289,64 +352,67 @@ func DisplayVols(vols map[string]string) {
 	}
 }
 
-func NextOpenVdx(vm string) (string , error) {
+func NextOpenVdx(vm string) (string, error) {
 	mappedblks := ListVMblks(vm)
-	next  := "vd"
+	next := "vd"
 	for _, c := range "abcdefghijklmnopqrstuvwxyz" {
 		found := false
-		for _,blkmap := range mappedblks {
-			if  "vd"+string(c) == blkmap.vdblk {
+		for _, blkmap := range mappedblks {
+			if "vd"+string(c) == blkmap.vdblk {
 				found = true
 				break
 			}
 		}
-		if  ! found {
+		if !found {
 			next += string(c)
 			break
 		}
 	}
-	if next == "vd"  {
-		return  "vdxerror" , errors.New("Can't find an open vdx block handle on VM")
+	if next == "vd" {
+		return "vdxerror", errors.New("Can't find an open vdx block handle on VM")
 	}
-	return next , nil
+	return next, nil
 }
 
 //Attache device from VM
-func AttachDisk(vm string, blkdev string) (error) {
-	vdxblk,err := NextOpenVdx(vm)
-	if  err != nil {return err }
+func AttachDisk(vm string, blkdev string) error {
+	vdxblk, err := NextOpenVdx(vm)
+	if err != nil {
+		return err
+	}
 	xml := "<disk type='block' device='disk'>\n"
 	xml += "   <driver name='qemu' type='raw' cache='none'/>\n"
-	xml += fmt.Sprintf("  <source dev='%s'/>\n",blkdev)
-	xml += fmt.Sprintf("  <target dev='%s' bus='virtio'/>\n",vdxblk)
+	xml += fmt.Sprintf("  <source dev='%s'/>\n", blkdev)
+	xml += fmt.Sprintf("  <target dev='%s' bus='virtio'/>\n", vdxblk)
 	xml += "</disk>\n"
 
-	file, err := ioutil.TempFile("/tmp", "disk.attach")    
-	if err != nil { return err }
+	file, err := ioutil.TempFile("/tmp", "disk.attach")
+	if err != nil {
+		return err
+	}
 	defer os.Remove(file.Name())
 	_, err = file.WriteString(xml)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Println(file.Name()) // For example "dir/prefix054003078"
-	args := []string{"attach-device",vm , file.Name(), "--current"}
+	args := []string{"attach-device", vm, file.Name(), "--current"}
 	cmd := exec.Command("virsh", args...)
-	return  cmd.Run()
+	return cmd.Run()
 }
 
-
-
 //Detach disk from VM
-func DetachDisk(vm string, blkdev string) (error) {
-	args := []string{"detach-disk",vm , blkdev}
+func DetachDisk(vm string, blkdev string) error {
+	args := []string{"detach-disk", vm, blkdev}
 	cmd := exec.Command("virsh", args...)
 	err := cmd.Run()
 	if err != nil {
-		fmt.Printf("ERROR %+v\n %+v\n",cmd,err)
+		fmt.Printf("ERROR %+v\n %+v\n", cmd, err)
 	}
 	return err
 }
 
-
-func ListVGs() (vgs []string ){
+func ListVGs() (vgs []string) {
 	//FIXME
 	vgs = []string{"sbvg_datalake"}
 	return vgs
@@ -354,7 +420,7 @@ func ListVGs() (vgs []string ){
 
 func StartAllPools() {
 	vgs := ListVGs()
-	for _,vg := range vgs {
+	for _, vg := range vgs {
 		DefinePool(vg)
 		StartPool(vg)
 		vols := ListHyprVols(vg)
@@ -362,74 +428,72 @@ func StartAllPools() {
 	}
 }
 
-func DefinePool(vg string ) error {
+func DefinePool(vg string) error {
 	//pools := ListAllPools()
 	//for _,pool := range pools {
 	//	if vg == pool {
 	//		return
 	//	}
 	//}
-	args := []string{"pool-define-as", vg ,"logical", "--source-name",vg, "--target", "/dev/"+vg}
+	args := []string{"pool-define-as", vg, "logical", "--source-name", vg, "--target", "/dev/" + vg}
 	cmd := exec.Command("virsh", args...)
 	_, err := cmd.CombinedOutput()
 	return err
 }
 
-func StartPool(vg string ) error  {
+func StartPool(vg string) error {
 	pools := ListPools()
-	for _,pool := range pools {
+	for _, pool := range pools {
 		if vg == pool {
 			return nil
 		}
 	}
-	args := []string{"pool-start", vg }
+	args := []string{"pool-start", vg}
 	cmd := exec.Command("virsh", args...)
 	_, err := cmd.CombinedOutput()
 	return err
 }
 
-func UndefinePool(vg string )  {
-	args := []string{"pool-destroy", vg }
+func UndefinePool(vg string) {
+	args := []string{"pool-destroy", vg}
 	virshcmd(args)
-	args = []string{"pool-undefine", vg }
+	args = []string{"pool-undefine", vg}
 	virshcmd(args)
 }
 
-
 func UnMapVMBlkDevs(dom string) {
-	if ! IsDomValid(dom ) {
+	if !IsDomValid(dom) {
 		fmt.Printf("VM not found %s\n", dom)
 	}
 	mappedblks := ListVMblks(dom)
 	for _, mappedblk := range mappedblks {
-		DetachDisk(dom,mappedblk.vdblk)
+		DetachDisk(dom, mappedblk.vdblk)
 	}
 }
 
-func BlkID(blkdev string) (string, error ){
-	cmd := exec.Command("blkid", "-po","udev", blkdev)
-        out, err := cmd.CombinedOutput()
+func BlkID(blkdev string) (string, error) {
+	cmd := exec.Command("blkid", "-po", "udev", blkdev)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return  "" , errors.New("Can't find block device on host")
+		return "", errors.New("Can't find block device on host")
 	}
-  
+
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		chunks := strings.Split(ln, "=")
 		if len(chunks) == 2 {
 			if chunks[0] == "ID_FS_UUID" {
-				return chunks[1] , nil
+				return chunks[1], nil
 			}
 		}
 	}
-	return  "" , errors.New("Can't find blockid device on host")
+	return "", errors.New("Can't find blockid device on host")
 }
-
 
 func main() {
 	pools := ListAllPools()
 	fmt.Printf("POOLS %v\n", pools)
-	mappings := ListMappings() 
+	mappings := ListMappings()
 	fmt.Printf("MAPPINGS %v\n", mappings)
 	//DetachDisk("Cent7","vdc")
 
@@ -437,22 +501,13 @@ func main() {
 	fmt.Printf("VGS %v\n", vgs)
 	StartAllPools()
 
-	//err:= AttachDisk("Cent7","/dev/sbvg_datalake/topper" ) 
-	//err:= AttachDisk("Cent7","/dev/sbvg_datalake/idle4" ) 
+	//err:= AttachDisk("Cent7","/dev/sbvg_datalake/topper" )
+	//err:= AttachDisk("Cent7","/dev/sbvg_datalake/idle4" )
 	//if err != nil {	fmt.Printf("ERROR ATTACHING  %+v\n",err) }
 }
-
 
 //List speedboat VGs
 // AllVolumeGroups
 
-
 //Create virsh pool from VG
 //Is VG a Pool
-
-
-
-
-
-
-

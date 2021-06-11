@@ -15,10 +15,10 @@ import (
 	"strings"
 	"syscall"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/Seagate/csiclvm/pkg/lvm"
-	"github.com/Seagate/csiclvm/pkg/virsh"
 	"github.com/Seagate/csiclvm/pkg/version"
+	"github.com/Seagate/csiclvm/pkg/virsh"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/uber-go/tally"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/semaphore"
@@ -38,7 +38,7 @@ type Server struct {
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
 	removingVolumeGroup  bool
-	ovirtHost	     string
+	ovirtHost            string
 	tags                 []string
 	probeModules         map[string]struct{}
 	nodeID               string
@@ -65,8 +65,8 @@ func NewServer(vgname string, pvnames []string, defaultFs string, ovirthost stri
 			"":        defaultFs,
 			defaultFs: defaultFs,
 		},
-		ovirtHost:	   ovirthost,
-		metrics: tally.NoopScope,
+		ovirtHost: ovirthost,
+		metrics:   tally.NoopScope,
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -188,16 +188,17 @@ func (s *Server) Setup() error {
 	log.Printf("Looking up volume group %v", s.vgname)
 	var volumeGroup *lvm.VolumeGroup
 	var err error
-	if s.ovirtHost == "none" {
+	//if s.ovirtHost == "none" {
+	if true {
 		volumeGroup, err = lvm.LookupVolumeGroup(s.vgname)
 	} else {
-		mercinfo,merr := virsh.HostConfig(s.ovirtHost)
+		mercinfo, merr := virsh.HostConfig(s.ovirtHost)
 		if merr != nil {
-			return fmt.Errorf("Cannot connect to Mercury service on %s\n%v", s.ovirtHost,merr)
-		}else {
-			_, lerr := virsh.LookupVolumeGroup(s.vgname,s.ovirtHost)
+			return fmt.Errorf("Cannot connect to Mercury service on %s\n%v", s.ovirtHost, merr)
+		} else {
+			_, lerr := virsh.LookupVolumeGroup(s.vgname, s.ovirtHost)
 			if lerr != nil {
-				return fmt.Errorf("Cannot Find %s on ovirt host\n%v", s.vgname,lerr)
+				return fmt.Errorf("Cannot Find %s on ovirt host\n%v", s.vgname, lerr)
 			}
 			log.Printf("Mercury service %v\n", mercinfo)
 		}
@@ -272,55 +273,60 @@ func (s *Server) Setup() error {
 	log.Printf("Found volume group %v", s.vgname)
 	// The volume group already exists. We check that the list of
 	// physical volumes matches the provided list.
-	log.Printf("Listing physical volumes in volume group %s", s.vgname)
-	var pverrs []error
-	for _, pvname := range s.pvnames {
-		// Check that the LVM2 metadata written to the start of the PV
-		// parses. There are reasonable scenarios where the list of
-		// PVs that comprise a VG might contain unexpected PVs or PVs
-		// that are unhealthy. Since the Probe call does not
-		// distinguish between DEGRADED and FAILED, we have no choice
-		// but to log an error but proceed without returning one.
-		log.Printf("Looking up LVM2 physical volume %v", pvname)
-		_, pverr := lvm.LookupPhysicalVolume(pvname)
-		if pverr != nil {
-			log.Printf("Cannot lookup physical volume %v: err=%v",
-				pvname, pverr)
-			pverrs = append(pverrs, pverr)
-		}
-	}
-	s.metrics.Gauge("lookup-pv-errs").Update(float64(len(pverrs)))
-	existing, err := volumeGroup.ListPhysicalVolumeNames()
-	if err != nil {
-		return fmt.Errorf(
-			"Cannot list physical volumes: err=%v",
-			err)
-	}
-	missing, unexpected := calculatePVDiff(existing, s.pvnames)
-	if len(missing) != 0 || len(unexpected) != 0 {
-		log.Printf("Volume group contains unexpected PVs %v and is missing PVs %v",
-			unexpected, missing)
-	}
-	s.metrics.Gauge("pvs").Update(float64(len(existing)))
-	s.metrics.Gauge("unexpected-pvs").Update(float64(len(unexpected)))
-	s.metrics.Gauge("missing-pvs").Update(float64(len(missing)))
+	// REMOVING PHYSICAL VOLUME MANAGEMENT
+	//	log.Printf("Listing physical volumes in volume group %s", s.vgname)
+	//	var pverrs []error
+	//	for _, pvname := range s.pvnames {
+	// Check that the LVM2 metadata written to the start of the PV
+	// parses. There are reasonable scenarios where the list of
+	// PVs that comprise a VG might contain unexpected PVs or PVs
+	// that are unhealthy. Since the Probe call does not
+	// distinguish between DEGRADED and FAILED, we have no choice
+	// but to log an error but proceed without returning one.
+	//		log.Printf("Looking up LVM2 physical volume %v", pvname)
+	//		_, pverr := lvm.LookupPhysicalVolume(pvname)
+	//		if pverr != nil {
+	//			log.Printf("Cannot lookup physical volume %v: err=%v",
+	//				pvname, pverr)
+	//			pverrs = append(pverrs, pverr)
+	//		}
+	//	}
+	//	s.metrics.Gauge("lookup-pv-errs").Update(float64(len(pverrs)))
+	//	existing, err := volumeGroup.ListPhysicalVolumeNames()
+	//	if err != nil {
+	//		return fmt.Errorf(
+	//			"Cannot list physical volumes: err=%v",
+	//			err)
+	//	}
+	//	missing, unexpected := calculatePVDiff(existing, s.pvnames)
+	//	if len(missing) != 0 || len(unexpected) != 0 {
+	//		log.Printf("Volume group contains unexpected PVs %v and is missing PVs %v",
+	//			unexpected, missing)
+	//	}
+	//	s.metrics.Gauge("pvs").Update(float64(len(existing)))
+	//	s.metrics.Gauge("unexpected-pvs").Update(float64(len(unexpected)))
+	//	s.metrics.Gauge("missing-pvs").Update(float64(len(missing)))
 	// We check that the volume group tags match those we expect.
-	log.Printf("Looking up volume group tags")
-	tags, err := volumeGroup.Tags()
-	if err != nil {
-		return fmt.Errorf(
-			"Cannot lookup tags: err=%v",
-			err)
-	}
-	log.Printf("Volume group tags: %v", tags)
-	if err := s.checkVolumeGroupTags(tags); err != nil {
-		return fmt.Errorf(
-			"Volume group tags did not match expected: err=%v",
-			err)
-	}
+	// IGNORING TAGS
+	//	log.Printf("Looking up volume group tags")
+	//	tags, err := volumeGroup.Tags()
+	//	if err != nil {
+	//		return fmt.Errorf(
+	//			"Cannot lookup tags: err=%v",
+	//			err)
+	//	}
+	//	log.Printf("Volume group tags: %v", tags)
+	//	if err := s.checkVolumeGroupTags(tags); err != nil {
+	//		return fmt.Errorf(
+	//			"Volume group tags did not match expected: err=%v",
+	//			err)
+	//	}
 	// The volume group is configured as expected.
 	log.Printf("Volume group matches configuration")
 	if s.removingVolumeGroup {
+		log.Printf("Removing a VG not support ")
+		return fmt.Errorf("Removing a VG not support ")
+		// DEAD CODE - Feature removed
 		log.Printf("Running with '-remove-volume-group'.")
 		// The volume group matches our config. We remove it
 		// as requested in the startup flags.
@@ -334,7 +340,8 @@ func (s *Server) Setup() error {
 		return nil
 	}
 	s.volumeGroup = volumeGroup
-	s.reportStorageMetrics()
+	// DEFEATURED using prometheus
+	//s.reportStorageMetrics()
 	return nil
 }
 
@@ -795,15 +802,12 @@ func (s *Server) ControllerPublishVolume(
 	return nil, ErrCallNotImplemented
 }
 
-
 func (s *Server) ControllerUnpublishVolume(
 	ctx context.Context,
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	log.Printf("ControllerUnPublishVolume not supported")
 	return nil, ErrCallNotImplemented
 }
-
-
 
 var ErrMismatchedFilesystemType = status.Error(
 	codes.InvalidArgument,
@@ -848,7 +852,7 @@ func (s *Server) ValidateVolumeCapabilities(
 	}
 	response := &csi.ValidateVolumeCapabilitiesResponse{
 		// TODO: Add optional Confirmed field
-		Message:   "",
+		Message: "",
 	}
 	return response, nil
 }
@@ -889,7 +893,7 @@ func (s *Server) ListVolumes(
 		return response, nil
 	}
 	//Error if starting token is offered - Needed to pass csi-sanity ListVolume with invalid start token
-	if  request.GetStartingToken() != "" {
+	if request.GetStartingToken() != "" {
 		return nil, status.Errorf(codes.Aborted, "Starting_Token field not implemented.")
 	}
 	volnames, err := s.volumeGroup.ListLogicalVolumeNames()
@@ -1018,7 +1022,6 @@ func (s *Server) DeleteSnapshot(
 	return nil, ErrCallNotImplemented
 }
 
-
 func (s *Server) ListSnapshots(
 	ctx context.Context,
 	request *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
@@ -1041,7 +1044,6 @@ func (s *Server) NodeStageVolume(
 	log.Printf("NodeStageVolume not supported")
 	return nil, ErrCallNotImplemented
 }
-
 
 func (s *Server) NodeUnstageVolume(
 	ctx context.Context,
@@ -1164,7 +1166,7 @@ func (s *Server) nodePublishVolume_Block(sourcePath, targetPath string, readonly
 		// ignored. As this RPC is idempotent, we respond with success.
 		return nil
 	} else {
-		// The CSI Plug in is required to create the target 
+		// The CSI Plug in is required to create the target
 		log.Printf("Creating Mount Target  %v ", targetPath)
 		if _, err := os.Create(targetPath); err != nil {
 			return status.Errorf(
@@ -1403,7 +1405,6 @@ func (s *Server) NodeUnpublishVolume(
 	return response, nil
 }
 
-
 func (s *Server) NodeGetInfo(
 	ctx context.Context,
 	request *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
@@ -1472,7 +1473,7 @@ func (s *Server) checkVolumeGroupTags(tags []string) error {
 		for _, t2 := range s.tags {
 			if t1 == t2 {
 				had = true
-				break  
+				break
 			}
 		}
 		if !had {
@@ -1513,7 +1514,7 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 			nosync, okns := params["nosync"]
 			if okns {
 				delete(params, "nosync")
-				if strings.ToLower(nosync)=="yes" || strings.ToLower(nosync) == "y" {
+				if strings.ToLower(nosync) == "yes" || strings.ToLower(nosync) == "y" {
 					layout.Nosync = 1
 				}
 			}
@@ -1531,7 +1532,7 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 			nosync, okns := params["nosync"]
 			if okns {
 				delete(params, "nosync")
-				if strings.ToLower(nosync)=="yes" || strings.ToLower(nosync) == "y" {
+				if strings.ToLower(nosync) == "yes" || strings.ToLower(nosync) == "y" {
 					layout.Nosync = 1
 				}
 			}

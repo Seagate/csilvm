@@ -14,14 +14,15 @@ import (
 
 	"google.golang.org/grpc"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/Seagate/csiclvm/pkg/csilvm"
 	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/Seagate/csiclvm/pkg/version"
+	"github.com/Seagate/csiclvm/pkg/virsh"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 
 	datadogstatsd "github.com/DataDog/datadog-go/statsd"
-	"github.com/cactus/go-statsd-client/statsd"
 	"github.com/Seagate/csiclvm/pkg/ddstatsd"
+	"github.com/cactus/go-statsd-client/statsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 )
@@ -192,6 +193,10 @@ func main() {
 			),
 		),
 	)
+	ipadrs := *ovirthostF
+	if !virsh.SetHostIP(ipadrs) {
+		logger.Fatalf("Invalid oVirt Host IP  ")
+	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	opts := []csilvm.ServerOpt{
 		csilvm.NodeID(*nodeIDF),

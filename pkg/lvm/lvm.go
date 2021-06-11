@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/Seagate/csiclvm/pkg/virsh"
 )
 
 // Control verbose output of all LVM CLI commands
@@ -330,7 +332,7 @@ func (c VolumeLayout) Flags() (fs []string) {
 	case 1:
 		fs = append(fs, "--nosync")
 	default:
-		// Default behavior of lvmcreate is to synchronize the mirror 
+		// Default behavior of lvmcreate is to synchronize the mirror
 	}
 	return fs
 }
@@ -505,7 +507,7 @@ func (vg *VolumeGroup) FindLogicalVolume(matchFirst func(lvsItem) bool) (*Logica
 	return nil, ErrLogicalVolumeNotFound
 }
 
-func RefreshMetaData(){
+func RefreshMetaData() {
 	c := exec.Command("partprobe")
 	log.Printf("Executing: partprobe")
 	c.Run()
@@ -688,7 +690,6 @@ func (lv *LogicalVolume) Remove() error {
 	}
 	return nil
 }
-
 
 func (lv *LogicalVolume) Activate() error {
 	if err := run("lvchange", nil, "-ay", lv.vg.name+"/"+lv.name); err != nil {
@@ -909,24 +910,25 @@ func LookupPhysicalVolume(name string) (*PhysicalVolume, error) {
 // https://github.com/Jajcus/lvm2/blob/266d6564d7a72fcff5b25367b7a95424ccf8089e/lib/metadata/metadata.c#L983
 
 func run(cmd string, v interface{}, extraArgs ...string) error {
-	// lvmlock can be nil, as it is a global variable that is intended to be
-	// initialized from calling code outside this package. We have no way of
-	// knowing whether the caller performed that initialization and must
-	// defensively check. In the future, we may decide to simply panic with a
-	// nil pointer dereference.
-	if lvmlock != nil {
-		// We use Lock instead of TryLock as we have no alternative way of
-		// making progress. We expect lvm2 command-line utilities invoked by
-		// this package to return within a reasonable amount of time.
-		if lerr := lvmlock.Lock(); lerr != nil {
-			return fmt.Errorf("lvm: acquire lock failed: %v", lerr)
-		}
-		defer func() {
-			if lerr := lvmlock.Unlock(); lerr != nil {
-				panic(fmt.Sprintf("lvm: release lock failed: %v", lerr))
-			}
-		}()
-	}
+	// Old Lock Check
+	//	// lvmlock can be nil, as it is a global variable that is intended to be
+	//	// initialized from calling code outside this package. We have no way of
+	//	// knowing whether the caller performed that initialization and must
+	//	// defensively check. In the future, we may decide to simply panic with a
+	//	// nil pointer dereference.
+	//	if lvmlock != nil {
+	//		// We use Lock instead of TryLock as we have no alternative way of
+	//		// making progress. We expect lvm2 command-line utilities invoked by
+	//		// this package to return within a reasonable amount of time.
+	//		if lerr := lvmlock.Lock(); lerr != nil {
+	//			return fmt.Errorf("lvm: acquire lock failed: %v", lerr)
+	//		}
+	//		defer func() {
+	//			if lerr := lvmlock.Unlock(); lerr != nil {
+	//				panic(fmt.Sprintf("lvm: release lock failed: %v", lerr))
+	//			}
+	//		}()
+	//	}
 	var args []string
 	if v != nil {
 		args = append(args, "--reportformat=json")
@@ -934,25 +936,37 @@ func run(cmd string, v interface{}, extraArgs ...string) error {
 		args = append(args, "--nosuffix")
 	}
 	args = append(args, extraArgs...)
-	c := exec.Command(cmd, args...)
-	log.Printf("Executing: %v", c)
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	c.Stdout = stdout
-	c.Stderr = stderr
-	if err := c.Run(); err != nil {
-		errstr := ignoreWarnings(stderr.String())
-		log.Print("stdout: " + stdout.String())
-		log.Print("stderr: " + errstr)
-		return errors.New(errstr)
-	}
-	stdoutbuf := stdout.Bytes()
-	stderrbuf := stderr.Bytes()
-	errstr := ignoreWarnings(string(stderrbuf))
-	log.Printf("stdout: " + string(stdoutbuf))
-	log.Printf("stderr: " + errstr)
-	if v != nil {
-		if err := json.Unmarshal(stdoutbuf, v); err != nil {
-			return fmt.Errorf("%v: [%v]", err, string(stdoutbuf))
+	if virsh.ProxyMode() {
+		jbytes, err := virsh.ProxyRun(cmd, args...)
+		if err != nil {
+			return fmt.Errorf("PROXY ERROR: %v", err)
+		}
+		if v != nil {
+			if err := json.Unmarshal(jbytes, v); err != nil {
+				return fmt.Errorf("%v: [%v]", err, string(jbytes))
+			}
+		}
+	} else {
+		c := exec.Command(cmd, args...)
+		log.Printf("Executing: %v", c)
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		c.Stdout = stdout
+		c.Stderr = stderr
+		if err := c.Run(); err != nil {
+			errstr := ignoreWarnings(stderr.String())
+			log.Print("stdout: " + stdout.String())
+			log.Print("stderr: " + errstr)
+			return errors.New(errstr)
+		}
+		stdoutbuf := stdout.Bytes()
+		stderrbuf := stderr.Bytes()
+		errstr := ignoreWarnings(string(stderrbuf))
+		log.Printf("stdout: " + string(stdoutbuf))
+		log.Printf("stderr: " + errstr)
+		if v != nil {
+			if err := json.Unmarshal(stdoutbuf, v); err != nil {
+				return fmt.Errorf("%v: [%v]", err, string(stdoutbuf))
+			}
 		}
 	}
 	return nil
