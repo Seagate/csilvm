@@ -797,16 +797,99 @@ var ErrCallUnknownNodeId = status.Error(codes.Unimplemented, "Unknown nodeid doe
 
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
-	request *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	log.Printf("ControllerPublishVolume not supported")
-	return nil, ErrCallNotImplemented
+	req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+
+	if !virsh.ProxyMode() {
+		log.Printf("ControllerPublishVolume not supported")
+		return nil, ErrCallNotImplemented
+	}
+	volumeID := req.GetVolumeId()
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "no volume ID provided")
+	}
+
+	nodeID := req.GetNodeId()
+	if nodeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "no node ID provided")
+	}
+
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no volume capabilities provided")
+	}
+
+	log.Printf("ControllerPublishVolume, Looking up volume with id=%v", volumeID)
+	_, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+	if err != nil {
+		return nil, ErrVolumeNotFound
+	}
+	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeID)
+	//Validate Domain Name
+	if !virsh.IsDomValid(nodeID) {
+		return nil, ErrCallUnknownNodeId
+	}
+	// Define virsh pool if it does not exist
+	if !virsh.IsPoolValid(s.vgname) {
+		err = virsh.DefinePool(s.vgname)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.vgname, err)
+			return nil, status.Error(codes.Internal, msg)
+		}
+	}
+	virsh.StartPool(s.vgname)
+	volpath, err := virsh.VolPath(s.vgname, volumeID)
+	if err != nil {
+		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n", s.vgname, err)
+		return nil, status.Error(codes.Internal, msg)
+	}
+	// Perform Mapping of lv in to VM
+	blkid, err2 := virsh.AttachDisk(nodeID, volpath)
+	if err2 != nil {
+		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
+		return nil, status.Error(codes.Internal, msg)
+	}
+	blkcontext := map[string]string{"blockid": blkid}
+	response := &csi.ControllerPublishVolumeResponse{PublishContext: blkcontext}
+	return response, nil
+
 }
 
 func (s *Server) ControllerUnpublishVolume(
 	ctx context.Context,
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
-	log.Printf("ControllerUnPublishVolume not supported")
-	return nil, ErrCallNotImplemented
+
+	if !virsh.ProxyMode() {
+		log.Printf("ControllerUnPublishVolume not supported")
+		return nil, ErrCallNotImplemented
+	}
+	//Validate Domain Name
+	nodeid := request.GetNodeId()
+	if !virsh.IsDomValid(nodeid) {
+		return nil, ErrCallUnknownNodeId
+	}
+	volumeID := request.GetVolumeId()
+	_, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+	if err != nil {
+		return nil, ErrVolumeNotFound
+	}
+	// Define virsh pool if it does not exist
+	if !virsh.IsPoolValid(s.vgname) {
+		err = virsh.DefinePool(s.vgname)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.vgname, err)
+			return nil, status.Error(codes.Internal, msg)
+		}
+	}
+	// Assume pool is started.  Skipping virsh.StartPool(s.volumeGroup.name)
+	volpath, err := virsh.VolPath(s.vgname, volumeID)
+	if err != nil {
+		err := virsh.DetachDisk(nodeid, volpath)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n", volpath, err)
+			return nil, status.Error(codes.Internal, msg)
+		}
+	}
+	response := &csi.ControllerUnpublishVolumeResponse{}
+	return response, nil
 }
 
 var ErrMismatchedFilesystemType = status.Error(
@@ -979,6 +1062,14 @@ func (s *Server) ControllerGetCapabilities(
 			Type: &csi.ControllerServiceCapability_Rpc{
 				Rpc: &csi.ControllerServiceCapability_RPC{
 					Type: csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+				},
+			},
+		},
+		// PUBLISH_UNPUBLISH_VOLUME
+		{
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
 				},
 			},
 		},
@@ -1307,6 +1398,9 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 }
 
 func determineFilesystemType(devicePath string) (string, error) {
+	if virsh.ProxyMode() {
+		return virsh.FstypeProxy(devicePath)
+	}
 	// We use `file -bsL` to determine whether any filesystem type is detected.
 	// If a filesystem is detected (ie., the output is not "data", we use
 	// `blkid` to determine what the filesystem is. We use `blkid` as `file`

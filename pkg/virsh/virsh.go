@@ -172,28 +172,40 @@ func LookupVolumeGroup(vg, ip string) (string, error) {
 
 // Test if virtual machine exists
 func IsDomValid(dom string) bool {
-	cmd := exec.Command("virsh", "domid", dom)
-	_, err := cmd.CombinedOutput()
-	if err == nil {
-		return true
+	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=domid~" + dom
+	log.Printf("GET: %s\n", url)
+	get, err := http.Get(url)
+	if err != nil {
+		log.Printf("VMLOOKUP FAILED: %+v", err)
+		return false
 	}
-	return false
+	if get.StatusCode != 200 {
+		log.Printf("VMLOOKUP FAILED: %+v", get)
+		return false
+	}
+	return true
 }
 
 // Test if storage pool exists
 func IsPoolValid(pool string) bool {
-	cmd := exec.Command("virsh", "pool-uuid", pool)
-	_, err := cmd.CombinedOutput()
-	if err == nil {
-		return true
+	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=pool-uuid~" + pool
+	get, err := http.Get(url)
+	if err != nil {
+		log.Printf("GET: %s\n", url)
+		log.Printf("VMPool Lookup faile: %+v", err)
+		return false
 	}
-	return false
+	if get.StatusCode != 200 {
+		log.Printf("VMPool Lookup faile: %+v", get)
+		return false
+	}
+	return true
 }
 
 //List Virtual Machines
 func ListVMs() (vms []string) {
 	args := []string{"list"}
-	out := virshcmd(args)
+	out, _ := virshProxy(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
@@ -212,7 +224,7 @@ func ListVMs() (vms []string) {
 //List VM's Speedboat Blk Devices
 func ListVMblks(vmname string) (mappings []vmblkmap) {
 	args := []string{"domblklist", vmname}
-	out := virshcmd(args)
+	out, _ := virshProxy(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
@@ -249,20 +261,46 @@ func ListMappings() (mappings []vmblkmap) {
 	return mappings
 }
 
-func virshcmd(args []string) []byte {
-	cmdb := "virsh"
-	cmd := exec.Command(cmdb, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("INFO Error running  %+v\n %+v\n", cmd, err)
+func virshProxy(args []string) ([]byte, error) {
+	runargs := ""
+	for _, arg := range args {
+		// Assume tilda is a save delimeter
+		runargs += arg + "~"
 	}
-	return out
+	runargs = strings.TrimSuffix(runargs, "~")
+	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=" + runargs
+	log.Printf("GET: %s\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return nil, err
+	}
+	bytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return nil, err2
+	}
+	return bytes, nil
+}
+
+func FstypeProxy(devicepath string) (string, error) {
+	url := "http://" + HostIP + ":3141/speedboat/claims/fstype?devpath=" + devicepath
+	log.Printf("GET: %s\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return "", err
+	}
+	bytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return "", err2
+	}
+	return string(bytes), nil
 }
 
 //List Virsh Pools
 func ListAllPools() (pools []string) {
 	args := []string{"pool-list", "--all"}
-	out := virshcmd(args)
+	out, _ := virshProxy(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
@@ -287,7 +325,7 @@ func ListAllPools() (pools []string) {
 //List Virsh Pools
 func ListPools() (pools []string) {
 	args := []string{"pool-list"}
-	out := virshcmd(args)
+	out, _ := virshProxy(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
@@ -313,7 +351,7 @@ func ListPools() (pools []string) {
 func ListHyprVols(pool string) map[string]string {
 	vols := make(map[string]string)
 	args := []string{"vol-list", pool}
-	out := virshcmd(args)
+	out, _ := virshProxy(args)
 	lines := strings.Split(string(out), "\n")
 	for _, ln := range lines {
 		words := strings.Fields(ln)
@@ -333,8 +371,7 @@ func ListHyprVols(pool string) map[string]string {
 
 func VolPath(pool, vol string) (string, error) {
 	args := []string{"vol-path", "--pool", pool, vol}
-	cmd := exec.Command("virsh", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := virshProxy(args)
 	return string(out), err
 }
 
@@ -375,10 +412,11 @@ func NextOpenVdx(vm string) (string, error) {
 }
 
 //Attache device from VM
-func AttachDisk(vm string, blkdev string) error {
+func AttachDisk(vm string, blkdev string) (string, error) {
+	blkid := "notfound"
 	vdxblk, err := NextOpenVdx(vm)
 	if err != nil {
-		return err
+		return blkid, err
 	}
 	xml := "<disk type='block' device='disk'>\n"
 	xml += "   <driver name='qemu' type='raw' cache='none'/>\n"
@@ -388,26 +426,30 @@ func AttachDisk(vm string, blkdev string) error {
 
 	file, err := ioutil.TempFile("/tmp", "disk.attach")
 	if err != nil {
-		return err
+		return blkid, err
 	}
 	defer os.Remove(file.Name())
 	_, err = file.WriteString(xml)
 	if err != nil {
-		return err
+		return blkid, err
 	}
-	fmt.Println(file.Name()) // For example "dir/prefix054003078"
+	//fmt.Println(file.Name())
+	cmd := exec.Command("blkid", blkdev)
+	if err != nil {
+		fmt.Printf("ERROR %+v\n %+v\n", cmd, err)
+		return blkid, err
+	}
 	args := []string{"attach-device", vm, file.Name(), "--current"}
-	cmd := exec.Command("virsh", args...)
-	return cmd.Run()
+	_, err = virshProxy(args)
+	return blkid, err
 }
 
 //Detach disk from VM
 func DetachDisk(vm string, blkdev string) error {
 	args := []string{"detach-disk", vm, blkdev}
-	cmd := exec.Command("virsh", args...)
-	err := cmd.Run()
+	_, err := virshProxy(args)
 	if err != nil {
-		fmt.Printf("ERROR %+v\n %+v\n", cmd, err)
+		fmt.Printf("ERROR Detaching  %+v\n %+v\n", args, err)
 	}
 	return err
 }
@@ -429,15 +471,8 @@ func StartAllPools() {
 }
 
 func DefinePool(vg string) error {
-	//pools := ListAllPools()
-	//for _,pool := range pools {
-	//	if vg == pool {
-	//		return
-	//	}
-	//}
 	args := []string{"pool-define-as", vg, "logical", "--source-name", vg, "--target", "/dev/" + vg}
-	cmd := exec.Command("virsh", args...)
-	_, err := cmd.CombinedOutput()
+	_, err := virshProxy(args)
 	return err
 }
 
@@ -449,16 +484,15 @@ func StartPool(vg string) error {
 		}
 	}
 	args := []string{"pool-start", vg}
-	cmd := exec.Command("virsh", args...)
-	_, err := cmd.CombinedOutput()
+	_, err := virshProxy(args)
 	return err
 }
 
 func UndefinePool(vg string) {
 	args := []string{"pool-destroy", vg}
-	virshcmd(args)
+	virshProxy(args)
 	args = []string{"pool-undefine", vg}
-	virshcmd(args)
+	virshProxy(args)
 }
 
 func UnMapVMBlkDevs(dom string) {
