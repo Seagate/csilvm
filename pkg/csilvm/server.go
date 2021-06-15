@@ -793,7 +793,6 @@ func deleteDataOnDevice(devicePath string) error {
 }
 
 var ErrCallNotImplemented = status.Error(codes.Unimplemented, "That RPC is not implemented.")
-var ErrCallUnknownNodeId = status.Error(codes.Unimplemented, "Unknown nodeid doesn't map to oVirt DOM.")
 
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
@@ -825,7 +824,7 @@ func (s *Server) ControllerPublishVolume(
 	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeID)
 	//Validate Domain Name
 	if !virsh.IsDomValid(nodeID) {
-		return nil, ErrCallUnknownNodeId
+		return nil, status.Error(codes.NotFound, "Unknown nodeid doesn't map to oVirt DOM.")
 	}
 	// Define virsh pool if it does not exist
 	if !virsh.IsPoolValid(s.vgname) {
@@ -836,13 +835,12 @@ func (s *Server) ControllerPublishVolume(
 		}
 	}
 	virsh.StartPool(s.vgname)
-	volpath, err := virsh.VolPath(s.vgname, volumeID)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n", s.vgname, err)
 		return nil, status.Error(codes.Internal, msg)
 	}
 	// Perform Mapping of lv in to VM
-	blkid, err2 := virsh.AttachDisk(nodeID, volpath)
+	blkid, err2 := virsh.AttachDisk(nodeID, s.vgname, volumeID)
 	if err2 != nil {
 		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
 		return nil, status.Error(codes.Internal, msg)
@@ -863,8 +861,11 @@ func (s *Server) ControllerUnpublishVolume(
 	}
 	//Validate Domain Name
 	nodeid := request.GetNodeId()
+	if nodeid == "" {
+		return nil, status.Error(codes.InvalidArgument, "no node ID provided")
+	}
 	if !virsh.IsDomValid(nodeid) {
-		return nil, ErrCallUnknownNodeId
+		return nil, status.Error(codes.NotFound, "Unknown nodeid "+nodeid+" doesn't map to oVirt DOM.")
 	}
 	volumeID := request.GetVolumeId()
 	_, err := s.volumeGroup.LookupLogicalVolume(volumeID)
@@ -880,13 +881,10 @@ func (s *Server) ControllerUnpublishVolume(
 		}
 	}
 	// Assume pool is started.  Skipping virsh.StartPool(s.volumeGroup.name)
-	volpath, err := virsh.VolPath(s.vgname, volumeID)
+	err = virsh.DetachDisk(nodeid, s.vgname, volumeID)
 	if err != nil {
-		err := virsh.DetachDisk(nodeid, volpath)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n", volpath, err)
-			return nil, status.Error(codes.Internal, msg)
-		}
+		msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n", volumeID, err)
+		return nil, status.Error(codes.Internal, msg)
 	}
 	response := &csi.ControllerUnpublishVolumeResponse{}
 	return response, nil
@@ -1173,24 +1171,30 @@ func (s *Server) NodePublishVolume(
 	ctx context.Context,
 	request *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	id := request.GetVolumeId()
-	log.Printf("Looking up volume with id=%v", id)
-	lv, err := s.volumeGroup.LookupLogicalVolume(id)
-	if err != nil {
-		return nil, ErrVolumeNotFound
-	}
-	log.Printf("Determining volume path")
-	sourcePath, err := lv.Path()
-	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Error in Path(): err=%v",
-			err)
-	}
-	if err := lv.Activate(); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Failed to activate volume: err=%v",
-			err)
+	sourcePath := ""
+	if virsh.ProxyMode() {
+		context := request.GetPublishContext()
+		sourcePath = "/dev/" + context["blockid"]
+	} else {
+		log.Printf("Looking up volume with id=%v", id)
+		lv, err := s.volumeGroup.LookupLogicalVolume(id)
+		if err != nil {
+			return nil, ErrVolumeNotFound
+		}
+		log.Printf("Determining volume path")
+		sourcePath, err = lv.Path()
+		if err != nil {
+			return nil, status.Errorf(
+				codes.Internal,
+				"Error in Path(): err=%v",
+				err)
+		}
+		if err := lv.Activate(); err != nil {
+			return nil, status.Errorf(
+				codes.Internal,
+				"Failed to activate volume: err=%v",
+				err)
+		}
 	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
@@ -1354,7 +1358,7 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 	}
 
 	log.Printf("Determining filesystem type at %v", sourcePath)
-	existingFstype, err := determineFilesystemType(sourcePath)
+	existingFstype, err := determineLocalFilesystemType(sourcePath)
 	if err != nil {
 		return status.Errorf(
 			codes.Internal,
@@ -1401,6 +1405,9 @@ func determineFilesystemType(devicePath string) (string, error) {
 	if virsh.ProxyMode() {
 		return virsh.FstypeProxy(devicePath)
 	}
+	return determineLocalFilesystemType(devicePath)
+}
+func determineLocalFilesystemType(devicePath string) (string, error) {
 	// We use `file -bsL` to determine whether any filesystem type is detected.
 	// If a filesystem is detected (ie., the output is not "data", we use
 	// `blkid` to determine what the filesystem is. We use `blkid` as `file`
@@ -1467,34 +1474,32 @@ func (s *Server) NodeUnpublishVolume(
 			targetPath, err)
 	}
 	log.Printf("Mount info at %v: %+v", targetPath, mp)
-	if mp == nil {
-		log.Printf("Nothing mounted at %v", targetPath)
-		// There is nothing mounted at targetPath, to support
-		// idempotency we return success.
-		response := &csi.NodeUnpublishVolumeResponse{}
-		return response, nil
-	}
-	const umountFlags = 0
-	log.Printf("Unmounting %v", targetPath)
-	if err := syscall.Unmount(targetPath, umountFlags); err != nil {
-		_, ok := err.(syscall.Errno)
-		if !ok {
+	if mp != nil {
+		const umountFlags = 0
+		log.Printf("Unmounting %v", targetPath)
+		if err := syscall.Unmount(targetPath, umountFlags); err != nil {
+			_, ok := err.(syscall.Errno)
+			if !ok {
+				return nil, status.Errorf(
+					codes.Internal,
+					"Failed to perform unmount: err=%v",
+					err)
+			}
 			return nil, status.Errorf(
-				codes.Internal,
+				codes.FailedPrecondition,
 				"Failed to perform unmount: err=%v",
 				err)
 		}
-		return nil, status.Errorf(
-			codes.FailedPrecondition,
-			"Failed to perform unmount: err=%v",
-			err)
 	}
+	log.Printf("Deleting Target Path  %s", targetPath)
+	os.RemoveAll(targetPath)
 	if err := lv.Deactivate(); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"Failed to de-activate volume: err=%v",
 			err)
 	}
+	log.Printf("Logical Volume De-Activated  %s", lv.Name())
 	response := &csi.NodeUnpublishVolumeResponse{}
 	return response, nil
 }

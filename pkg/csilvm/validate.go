@@ -3,6 +3,7 @@ package csilvm
 import (
 	"context"
 
+	"github.com/Seagate/csiclvm/pkg/virsh"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -373,6 +374,7 @@ func (v *nodeServerValidator) NodePublishVolume(
 var ErrMissingTargetPath = status.Error(codes.InvalidArgument, "The target_path field must be specified.")
 var ErrMissingVolumeCapability = status.Error(codes.InvalidArgument, "The volume_capability field must be specified.")
 var ErrSpecifiedPublishContext = status.Error(codes.InvalidArgument, "The publish_volume_context field must not be specified.")
+var ErrSpecifiedPublishNoContext = status.Error(codes.InvalidArgument, "The publish_volume_context field must be specified in Proxy Mode.")
 
 func validateNodePublishVolumeRequest(request *csi.NodePublishVolumeRequest, removingVolumeGroup bool, supportedFilesystems map[string]string) error {
 	if err := validateRemoving(removingVolumeGroup); err != nil {
@@ -383,8 +385,14 @@ func validateNodePublishVolumeRequest(request *csi.NodePublishVolumeRequest, rem
 		return ErrMissingVolumeId
 	}
 	publishContext := request.GetPublishContext()
-	if publishContext != nil {
-		return ErrSpecifiedPublishContext
+	if virsh.ProxyMode() {
+		if publishContext == nil {
+			return ErrSpecifiedPublishNoContext
+		}
+	} else {
+		if publishContext != nil {
+			return ErrSpecifiedPublishContext
+		}
 	}
 	targetPath := request.GetTargetPath()
 	if targetPath == "" {
@@ -469,5 +477,3 @@ func (v *nodeServerValidator) NodeGetVolumeStats(
 	request *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	return v.inner.NodeGetVolumeStats(ctx, request)
 }
-
-

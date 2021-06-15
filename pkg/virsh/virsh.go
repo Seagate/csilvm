@@ -19,7 +19,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -375,13 +374,6 @@ func VolPath(pool, vol string) (string, error) {
 	return string(out), err
 }
 
-func UnMapAllDomains() {
-	vms := ListVMs()
-	for _, vm := range vms {
-		UnMapVMBlkDevs(vm)
-	}
-}
-
 func DisplayVols(vols map[string]string) {
 	for name, _ := range vols {
 		//fmt.Printf(" >  %s %s  \n", name,path)
@@ -412,46 +404,37 @@ func NextOpenVdx(vm string) (string, error) {
 }
 
 //Attache device from VM
-func AttachDisk(vm string, blkdev string) (string, error) {
-	blkid := "notfound"
-	vdxblk, err := NextOpenVdx(vm)
-	if err != nil {
-		return blkid, err
-	}
-	xml := "<disk type='block' device='disk'>\n"
-	xml += "   <driver name='qemu' type='raw' cache='none'/>\n"
-	xml += fmt.Sprintf("  <source dev='%s'/>\n", blkdev)
-	xml += fmt.Sprintf("  <target dev='%s' bus='virtio'/>\n", vdxblk)
-	xml += "</disk>\n"
+func AttachDisk(vm, vgroup, lvname string) (string, error) {
+	url := "http://" + HostIP + ":3141/speedboat/virsh/attachdisk?nodeid=" + vm
+	url += "&vgroup=" + vgroup
+	url += "&lvname=" + lvname
 
-	file, err := ioutil.TempFile("/tmp", "disk.attach")
+	log.Printf("GET: %s\n", url)
+	resp, err := http.Get(url)
 	if err != nil {
-		return blkid, err
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return "", err
 	}
-	defer os.Remove(file.Name())
-	_, err = file.WriteString(xml)
-	if err != nil {
-		return blkid, err
+	bytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return "", err2
 	}
-	//fmt.Println(file.Name())
-	cmd := exec.Command("blkid", blkdev)
-	if err != nil {
-		fmt.Printf("ERROR %+v\n %+v\n", cmd, err)
-		return blkid, err
-	}
-	args := []string{"attach-device", vm, file.Name(), "--current"}
-	_, err = virshProxy(args)
-	return blkid, err
+	return string(bytes), nil
 }
 
 //Detach disk from VM
-func DetachDisk(vm string, blkdev string) error {
-	args := []string{"detach-disk", vm, blkdev}
-	_, err := virshProxy(args)
+func DetachDisk(vm, vgroup, lvname string) error {
+	url := "http://" + HostIP + ":3141/speedboat/virsh/detachdisk?nodeid=" + vm
+	url += "&vgroup=" + vgroup
+	url += "&lvname=" + lvname
+
+	log.Printf("GET: %s\n", url)
+	_, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("ERROR Detaching  %+v\n %+v\n", args, err)
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return err
 	}
-	return err
+	return nil
 }
 
 func ListVGs() (vgs []string) {
@@ -493,16 +476,6 @@ func UndefinePool(vg string) {
 	virshProxy(args)
 	args = []string{"pool-undefine", vg}
 	virshProxy(args)
-}
-
-func UnMapVMBlkDevs(dom string) {
-	if !IsDomValid(dom) {
-		fmt.Printf("VM not found %s\n", dom)
-	}
-	mappedblks := ListVMblks(dom)
-	for _, mappedblk := range mappedblks {
-		DetachDisk(dom, mappedblk.vdblk)
-	}
 }
 
 func BlkID(blkdev string) (string, error) {
