@@ -1462,8 +1462,10 @@ func (s *Server) NodeUnpublishVolume(
 	id := request.GetVolumeId()
 	log.Printf("Looking up volume with id=%v", id)
 	lv, err := s.volumeGroup.LookupLogicalVolume(id)
+	response := &csi.NodeUnpublishVolumeResponse{}
 	if err != nil {
-		return nil, ErrVolumeNotFound
+		// Repond good if not found for idempotency
+		return response, nil
 	}
 	targetPath := request.GetTargetPath()
 	mp, err := getMountAt(targetPath)
@@ -1500,7 +1502,6 @@ func (s *Server) NodeUnpublishVolume(
 			err)
 	}
 	log.Printf("Logical Volume De-Activated  %s", lv.Name())
-	response := &csi.NodeUnpublishVolumeResponse{}
 	return response, nil
 }
 

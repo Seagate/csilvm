@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -68,7 +69,8 @@ func main() {
 	flag.Var(&tagsF, "tag", "Value to tag the volume group with (can be given multiple times)")
 	var probeModulesF stringsFlag
 	flag.Var(&probeModulesF, "probe-module", "Probe checks that the kernel module is loaded")
-	nodeIDF := flag.String("node-id", "", "The node ID reported via the CSI Node gRPC service")
+	thishost, _ := os.Hostname()
+	nodeIDF := flag.String("node-id", thishost, "The node ID reported via the CSI Node gRPC service")
 	lockFilePathF := flag.String("lockfile", defaultLockfilePathOrEnv(), "The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances")
 	ovirthostF := flag.String("ovirt-ip", "none", "The ip address of the oVirt host when running on a oVirt/RHV virtual machine")
 	// Metrics-related flags
@@ -106,6 +108,13 @@ func main() {
 	logger.Printf("Unlinking socket file in case it still exists: %q", sock)
 	if err := syscall.Unlink(sock); err != nil {
 		logger.Printf("Failed to unlink socket file: %v", err)
+	}
+	// Make directory path for socket if doesn't exist
+	if _, err := os.Stat(path.Dir(sock)); os.IsNotExist(err) {
+		err := os.Mkdir(path.Dir(sock), os.ModePerm)
+		if err != nil {
+			logger.Fatalf("Failed to create socket directory: %s ::%v", path.Dir(sock), err)
+		}
 	}
 	// Setup socket listener
 	lis, err := net.Listen("unix", sock)
@@ -195,7 +204,7 @@ func main() {
 	)
 	ipadrs := *ovirthostF
 	if !virsh.SetHostIP(ipadrs) {
-		logger.Fatalf("Invalid oVirt Host IP  ")
+		logger.Printf("Invalid oVirt Host IP.  Not Running Proxy Mode")
 	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	opts := []csilvm.ServerOpt{
