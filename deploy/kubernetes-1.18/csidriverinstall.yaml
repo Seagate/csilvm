@@ -1,0 +1,55 @@
+- hosts: all 
+  user: root
+  tasks:
+    - name: Smoke Test 
+      shell: echo hello > /tmp/abc.txt
+
+    - name: Ensure group Speedboat exists
+      group:
+        name: _s_p_e_e_d_b_o_a_t_
+        state: present
+
+    - name: Create Speedboat User and add to group
+      user:
+        name: sbuser
+        comment: "Speedboat User pw codename"
+        uid: 31415
+        groups: "_s_p_e_e_d_b_o_a_t_, disk"
+        password: $6$rounds=656000$123mysecretsalt$LnCzbmm44fJubBKgt/.tta.p/DNEsbP39WJ2Ca0hRqXRP8dA30FJTt6BlJMpAi8RSL0acdC4lr9mMllih9FyI1
+
+    - name: Create Speedboat Folder
+      file: 
+        path: /var/speedboat/mercury
+        owner: sbuser
+        group: "_s_p_e_e_d_b_o_a_t_"
+        mode: 0755 
+        state: directory
+
+    - name: Stop Running CSI Driver
+      systemd:
+        name: csiclvm.service
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Copy CSI Driver
+      copy:
+        src: ../../csilvm
+        dest: /var/speedboat/mercury/csiclvm
+        owner: sbuser
+        group: "_s_p_e_e_d_b_o_a_t_"
+        mode: '0744'
+
+    - name: Create CSI Driver Service
+      copy:
+        src: ./csiclvm.service
+        dest: /etc/systemd/system
+        owner: sbuser
+        group: "_s_p_e_e_d_b_o_a_t_"
+        mode: '0744'
+
+    - name: Enable and Start CSI Driver
+      systemd:
+        name: csiclvm.service
+        state: restarted
+        enabled: yes
