@@ -1596,7 +1596,6 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 	if ok {
 		// Consume the 'type' key from the parameters.
 		delete(params, "type")
-		// We only support 'linear' and 'raid1/10' volume types at the moment.
 		switch voltype {
 		case "linear":
 			layout.Type = lvm.VolumeTypeLinear
@@ -1618,6 +1617,28 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 					layout.Nosync = 1
 				}
 			}
+		case "raid5":
+			layout.Type = lvm.VolumeTypeRAID5
+			strps, ok := params["stripes"]
+			if ok {
+				delete(params, "stripes")
+				stripes, err := strconv.ParseUint(strps, 10, 64)
+				if err != nil || stripes < 1 {
+					return layout, fmt.Errorf("The 'stripes' parameter must be a positive integer: err=%v", err)
+				}
+				layout.Stripes = stripes
+			}
+		case "raid6":
+			layout.Type = lvm.VolumeTypeRAID6
+			strps, ok := params["stripes"]
+			if ok {
+				delete(params, "stripes")
+				stripes, err := strconv.ParseUint(strps, 10, 64)
+				if err != nil || stripes < 1 {
+					return layout, fmt.Errorf("The 'stripes' parameter must be a positive integer: err=%v", err)
+				}
+				layout.Stripes = stripes
+			}
 		case "raid10":
 			layout.Type = lvm.VolumeTypeRAID10
 			strps, ok := params["stripes"]
@@ -1637,7 +1658,7 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 				}
 			}
 		default:
-			return layout, errors.New("The 'type' parameter must be one of 'linear', 'raid1' or 'raid10'.")
+			return layout, errors.New("The 'type' parameter must be one of 'linear', 'raid1', 'raid5', 'raid6' or 'raid10'.")
 		}
 	}
 	return layout, nil

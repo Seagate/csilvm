@@ -133,7 +133,7 @@ func (vg *VolumeGroup) BytesFree(raid VolumeLayout) (uint64, error) {
 
 func (r VolumeLayout) extentsFree(count uint64) uint64 {
 	switch r.Type {
-	case VolumeTypeDefault, VolumeTypeLinear:
+	case VolumeTypeDefault, VolumeTypeLinear, VolumeTypeRAID5, VolumeTypeRAID6:
 		return count
 	case VolumeTypeRAID1, VolumeTypeRAID10:
 		mirrors := r.Mirrors
@@ -244,6 +244,8 @@ var (
 	VolumeTypeDefault VolumeType
 	VolumeTypeLinear  = VolumeType{"linear"}
 	VolumeTypeRAID1   = VolumeType{"raid1"}
+	VolumeTypeRAID5   = VolumeType{"raid5"}
+	VolumeTypeRAID6   = VolumeType{"raid6"}
 	VolumeTypeRAID10  = VolumeType{"raid10"}
 )
 
@@ -276,6 +278,12 @@ func (c VolumeLayout) MinNumberOfDevices() uint64 {
 			mirrors = 1
 		}
 		return 2 * mirrors
+	case VolumeTypeRAID5:
+		stripes := c.Stripes
+		return stripes + 1
+	case VolumeTypeRAID6:
+		stripes := c.Stripes
+		return stripes + 2
 	case VolumeTypeRAID10:
 		mirrors := c.Mirrors
 		if mirrors == 0 {
@@ -299,6 +307,10 @@ func (c VolumeLayout) Flags() (fs []string) {
 		fs = append(fs, "--type=linear")
 	case VolumeTypeRAID1:
 		fs = append(fs, "--type=raid1")
+	case VolumeTypeRAID5:
+		fs = append(fs, "--type=raid5")
+	case VolumeTypeRAID6:
+		fs = append(fs, "--type=raid6")
 	case VolumeTypeRAID10:
 		fs = append(fs, "--type=raid10")
 	default:
