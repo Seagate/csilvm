@@ -826,20 +826,10 @@ func (s *Server) ControllerPublishVolume(
 	if !virsh.IsDomValid(nodeID) {
 		return nil, status.Error(codes.NotFound, "Unknown nodeid doesn't map to oVirt DOM.")
 	}
-	// Define virsh pool if it does not exist
-	if !virsh.IsPoolValid(s.vgname) {
-		err = virsh.DefinePool(s.vgname)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.vgname, err)
-			return nil, status.Error(codes.Internal, msg)
-		}
-	}
-	virsh.StartPool(s.vgname)
-	if err != nil {
-		msg := fmt.Sprintf("Failed to find virsh vol for %s\n %v\n", s.vgname, err)
-		return nil, status.Error(codes.Internal, msg)
-	}
-	// Perform Mapping of lv in to VM
+	// Not using virsh pools because it doesn't activate VGs with shared locks
+	// Assume VG is started with shared locks.
+
+	// Perform Mapping of vg/lv in to VM block device
 	blkid, err2 := virsh.AttachDisk(nodeID, s.vgname, volumeID)
 	if err2 != nil {
 		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
@@ -872,15 +862,6 @@ func (s *Server) ControllerUnpublishVolume(
 	if err != nil {
 		return nil, ErrVolumeNotFound
 	}
-	// Define virsh pool if it does not exist
-	if !virsh.IsPoolValid(s.vgname) {
-		err = virsh.DefinePool(s.vgname)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to define pool for %s\n %v\n", s.vgname, err)
-			return nil, status.Error(codes.Internal, msg)
-		}
-	}
-	// Assume pool is started.  Skipping virsh.StartPool(s.volumeGroup.name)
 	err = virsh.DetachDisk(nodeid, s.vgname, volumeID)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n", volumeID, err)

@@ -399,6 +399,8 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 	}
 	args = append(args, opts.Flags()...)
+	args = append(args, "-an") // Don't activate new LVs.  Let Controller Publish do it
+	args = append(args, "-y")  // Option to answer yes to wipe if LVM detects xfs signature at block 0
 	if err := run("lvcreate", nil, args...); err != nil {
 		if isInsufficientSpace(err) {
 			return nil, ErrNoSpace
