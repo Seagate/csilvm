@@ -799,8 +799,9 @@ func (s *Server) ControllerPublishVolume(
 	req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 
 	if !virsh.ProxyMode() {
-		log.Printf("ControllerPublishVolume not supported")
-		return nil, ErrCallNotImplemented
+		blkcontext := map[string]string{"blockid": "notneeded"}
+		response := &csi.ControllerPublishVolumeResponse{PublishContext: blkcontext}
+		return response, nil
 	}
 	volumeID := req.GetVolumeId()
 	if volumeID == "" {
@@ -846,8 +847,8 @@ func (s *Server) ControllerUnpublishVolume(
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 
 	if !virsh.ProxyMode() {
-		log.Printf("ControllerUnPublishVolume not supported")
-		return nil, ErrCallNotImplemented
+		response := &csi.ControllerUnpublishVolumeResponse{}
+		return response, nil
 	}
 	//Validate Domain Name
 	nodeid := request.GetNodeId()

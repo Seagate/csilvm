@@ -389,10 +389,6 @@ func validateNodePublishVolumeRequest(request *csi.NodePublishVolumeRequest, rem
 		if publishContext == nil {
 			return ErrSpecifiedPublishNoContext
 		}
-	} else {
-		if publishContext != nil {
-			return ErrSpecifiedPublishContext
-		}
 	}
 	targetPath := request.GetTargetPath()
 	if targetPath == "" {
