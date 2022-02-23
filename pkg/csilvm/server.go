@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	topologyKey = "datalake.speedboat.seagate.com/nodeId"
+	topologyKey = ".speedboat.seagate.com/nodeId"
 )
 
 type Server struct {
@@ -364,9 +364,10 @@ func (s *Server) GetPluginInfo(
 	if v.BuildTime != "" {
 		m[manifestBuildTime] = v.BuildTime
 	}
+	tenant := s.vgname[5:len(s.vgname)]
 
 	response := &csi.GetPluginInfoResponse{
-		Name:          v.Product,
+		Name:          tenant + v.Product,
 		VendorVersion: v.Version,
 		Manifest:      m,
 	}
@@ -1490,8 +1491,9 @@ func (s *Server) NodeUnpublishVolume(
 func (s *Server) NodeGetInfo(
 	ctx context.Context,
 	request *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+	tenant := s.vgname[5:len(s.vgname)]
 	topology := &csi.Topology{
-		Segments: map[string]string{topologyKey: s.nodeID},
+		Segments: map[string]string{tenant + topologyKey: s.nodeID},
 	}
 	return &csi.NodeGetInfoResponse{
 		NodeId:             s.nodeID,

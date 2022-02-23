@@ -5,8 +5,8 @@ OS := $(shell uname)
 DOCKERFILE_MD5SUM=$(shell md5sum ./Dockerfile | cut -d" " -f1)
 DEV_DOCKER_IMAGE := csilvm_dev:$(DOCKERFILE_MD5SUM)
 
-PLUGIN_NAME ?= datalake.speedboat.seagate.com
-PLUGIN_VERSION ?= v0.13-ovirt
+PLUGIN_NAME ?= .speedboat.seagate.com
+PLUGIN_VERSION ?= v0.17-ovirt
 BUILD_TIME ?= $(shell date +"%Y%m%dT%H%M%S.%N%z")
 PACKAGE_SHA ?= nosha
 
