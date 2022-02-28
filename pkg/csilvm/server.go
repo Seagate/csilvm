@@ -552,7 +552,8 @@ func (s *Server) CreateVolume(
 		return nil, status.Error(codes.Internal, "Failed to allocate volume ID")
 	}
 	log.Printf("Volume with id=%v does not already exist", volumeID)
-	layout, err := takeVolumeLayoutFromParameters(dupParams(request.GetParameters()))
+	params := dupParams(request.GetParameters())
+	layout, err := takeVolumeLayoutFromParameters(params)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Invalid volume layout: err=%v", err)
 	}
@@ -629,6 +630,17 @@ func (s *Server) CreateVolume(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get volume attributes: err=%v", err)
 	}
+
+	// Pass on QOS in Volume Context for ControllerPublish
+	iopspergb, ok := params["iopspergb"]
+	if ok {
+		attr["iopspergb"] = iopspergb
+	}
+	mbpspergb, okk := params["mbpspergb"]
+	if okk {
+		attr["mbpspergb"] = mbpspergb
+	}
+
 	defer s.reportStorageMetrics()
 	response := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -799,9 +811,11 @@ func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
 	req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 
+	// Pass QOS from Volume Context from Vol Create in Publish Context
+	pubcontext := dupParams(req.GetVolumeContext())
 	if !virsh.ProxyMode() {
-		blkcontext := map[string]string{"blockid": "notneeded"}
-		response := &csi.ControllerPublishVolumeResponse{PublishContext: blkcontext}
+		pubcontext["blockid"] = "notneeded"
+		response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
 		return response, nil
 	}
 	volumeID := req.GetVolumeId()
@@ -837,8 +851,8 @@ func (s *Server) ControllerPublishVolume(
 		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
 		return nil, status.Error(codes.Internal, msg)
 	}
-	blkcontext := map[string]string{"blockid": blkid}
-	response := &csi.ControllerPublishVolumeResponse{PublishContext: blkcontext}
+	pubcontext["blockid"] = blkid
+	response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
 	return response, nil
 
 }
@@ -1154,10 +1168,10 @@ func (s *Server) NodePublishVolume(
 	ctx context.Context,
 	request *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	id := request.GetVolumeId()
+	pubcontext := request.GetPublishContext()
 	sourcePath := ""
 	if virsh.ProxyMode() {
-		context := request.GetPublishContext()
-		sourcePath = "/dev/" + context["blockid"]
+		sourcePath = "/dev/" + pubcontext["blockid"]
 	} else {
 		log.Printf("Looking up volume with id=%v", id)
 		lv, err := s.volumeGroup.LookupLogicalVolume(id)
@@ -1199,6 +1213,17 @@ func (s *Server) NodePublishVolume(
 	default:
 		panic(fmt.Sprintf("lvm: unknown access_type: %+v", accessType))
 	}
+
+	// Set QOS
+	iopspergb, ok := pubcontext["iopspergb"]
+	if ok {
+		mbpspergb, ok := pubcontext["mbpspergb"]
+		if ok {
+			lv, _ := s.volumeGroup.LookupLogicalVolume(id)
+			virsh.SetQos(lv.VgName(), lv.Name(), iopspergb, mbpspergb)
+		}
+	}
+
 	response := &csi.NodePublishVolumeResponse{}
 	return response, nil
 }
@@ -1450,6 +1475,8 @@ func (s *Server) NodeUnpublishVolume(
 		// Repond good if not found for idempotency
 		return response, nil
 	}
+	// Clear QOS
+	virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
 	targetPath := request.GetTargetPath()
 	mp, err := getMountAt(targetPath)
 	if err != nil {
@@ -1672,6 +1699,15 @@ func volumeOptsFromParameters(in map[string]string) (opts []lvm.CreateLogicalVol
 	}
 	opts = append(opts, lvm.VolumeLayoutOpt(layout))
 
+	// Ignore QOS settings
+	_, ok := params["iopspergb"]
+	if ok {
+		delete(params, "iopspergb")
+	}
+	_, ok = params["mbpspergb"]
+	if ok {
+		delete(params, "mbpspergb")
+	}
 	if len(params) > 0 {
 		var keys []string
 		for k := range params {

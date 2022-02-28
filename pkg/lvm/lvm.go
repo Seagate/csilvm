@@ -664,6 +664,10 @@ func (lv *LogicalVolume) SizeInBytes() uint64 {
 	return lv.sizeInBytes
 }
 
+func (lv *LogicalVolume) VgName() string {
+	return lv.vg.name
+}
+
 // Path returns the device path for the logical volume.
 func (lv *LogicalVolume) Path() (string, error) {
 	result := new(lvsOutput)

@@ -443,6 +443,20 @@ func ListVGs() (vgs []string) {
 	return vgs
 }
 
+func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
+	url := "http://localhost:3141/speedboat/claims/qos?tenantname=" + vgname[5:]
+	url += "&claim=" + lvname
+	url += "&iopspergb=" + iopspergb
+	url += "&mbpspergb=" + mbpspergb
+
+	log.Printf("GET: %s\n", url)
+	_, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+	}
+	return err
+}
+
 func StartAllPools() {
 	vgs := ListVGs()
 	for _, vg := range vgs {
