@@ -723,6 +723,20 @@ func (lv *LogicalVolume) Deactivate() error {
 	return nil
 }
 
+func (lv *LogicalVolume) AddTag(tag string) error {
+	if err := run("lvchange", nil, "--addtag", tag, lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lv *LogicalVolume) DeleteTag(tag string) error {
+	if err := run("lvchange", nil, "--addtag", tag, lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
 // PVScan runs the `pvscan --cache <dev>` command. It scans for the
 // device at `dev` and adds it to the LVM metadata cache if `lvmetad`
 // is running. If `dev` is an empty string, it scans all devices.

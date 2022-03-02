@@ -1220,7 +1220,10 @@ func (s *Server) NodePublishVolume(
 		mbpspergb, ok := pubcontext["mbpspergb"]
 		if ok {
 			lv, _ := s.volumeGroup.LookupLogicalVolume(id)
-			virsh.SetQos(lv.VgName(), lv.Name(), iopspergb, mbpspergb)
+			err := lv.AddTag("qos-" + iopspergb + "-" + mbpspergb)
+			if err != nil {
+				log.Printf("ERROR setting QOS tag %+v \n", err)
+			}
 		}
 	}
 
@@ -1598,6 +1601,7 @@ func (s *Server) NodeGetCapabilities(
 	ctx context.Context,
 	request *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	response := &csi.NodeGetCapabilitiesResponse{}
+	defer virsh.QosSync()
 	return response, nil
 }
 

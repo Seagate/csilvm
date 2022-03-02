@@ -457,6 +457,16 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 	return err
 }
 
+func QosSync() error {
+	url := "http://localhost:3141/speedboat/claims/qossync"
+	log.Printf("GET: %s\n", url)
+	_, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+	}
+	return err
+}
+
 func StartAllPools() {
 	vgs := ListVGs()
 	for _, vg := range vgs {
