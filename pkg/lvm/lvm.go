@@ -399,7 +399,7 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 	}
 	args = append(args, opts.Flags()...)
-	args = append(args, "-an") // Don't activate new LVs.  Let Controller Publish do it
+	args = append(args, "-ay")
 	args = append(args, "-y")  // Option to answer yes to wipe if LVM detects xfs signature at block 0
 	if err := run("lvcreate", nil, args...); err != nil {
 		if isInsufficientSpace(err) {
@@ -410,10 +410,13 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 		return nil, err
 	}
-	// Deactivate so another node in the cluster can activate
+	// Clear out residual partition info
+	if err := run("wipefs", nil, "--all", "/dev/"+vg.name+"/"+name); err != nil {
+		log.Printf("Error wiping signature block: %v", err)
+	}
 	// If new LV is not activated the --nosyn will be ignored
 	newlv := &LogicalVolume{name, sizeInBytes, vg}
-	newlv.Deactivate()
+	newlv.Deactivate() // Don't activate new LVs.  Let Node Publish do it
 	return newlv, nil
 }
 
@@ -987,7 +990,7 @@ func run(cmd string, v interface{}, extraArgs ...string) error {
 		if err := c.Run(); err != nil {
 			errstr := ignoreWarnings(stderr.String())
 			log.Print("stdout: " + stdout.String())
-			log.Print("stderr: " + errstr)
+			log.Printf("stderr: %v ", err)
 			return errors.New(errstr)
 		}
 		stdoutbuf := stdout.Bytes()
