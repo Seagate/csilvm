@@ -86,6 +86,7 @@ func HostConfig(ip string) (mercinfo, error) {
 		return info, err
 	}
 	jbytes, err2 := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err2 != nil {
 		return info, err2
 	}
@@ -110,6 +111,7 @@ func ProxyRun(cmd string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	jbytes, err2 := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err2 != nil {
 		return nil, err2
 	}
@@ -155,12 +157,14 @@ func LookupVolumeGroup(vg, ip string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer get.Body.Close()
 	//log.Printf("GET: %+v", get)
 	if get.StatusCode != 200 {
 		return "", fmt.Errorf("Tenant Join Failed")
 	}
 
 	jbytes, err2 := ioutil.ReadAll(get.Body)
+	defer get.Body.Close()
 	if err2 != nil {
 		return "", err2
 	}
@@ -174,6 +178,7 @@ func IsDomValid(dom string) bool {
 	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=domid~" + dom
 	log.Printf("GET: %s\n", url)
 	get, err := http.Get(url)
+	defer get.Body.Close()
 	if err != nil {
 		log.Printf("VMLOOKUP FAILED: %+v", err)
 		return false
@@ -189,6 +194,7 @@ func IsDomValid(dom string) bool {
 func IsPoolValid(pool string) bool {
 	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=pool-uuid~" + pool
 	get, err := http.Get(url)
+	defer get.Body.Close()
 	if err != nil {
 		log.Printf("GET: %s\n", url)
 		log.Printf("VMPool Lookup faile: %+v", err)
@@ -275,6 +281,7 @@ func virshProxy(args []string) ([]byte, error) {
 		return nil, err
 	}
 	bytes, err2 := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err2 != nil {
 		return nil, err2
 	}
@@ -290,6 +297,7 @@ func FstypeProxy(devicepath string) (string, error) {
 		return "", err
 	}
 	bytes, err2 := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err2 != nil {
 		return "", err2
 	}
@@ -416,6 +424,7 @@ func AttachDisk(vm, vgroup, lvname string) (string, error) {
 		return "", err
 	}
 	bytes, err2 := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err2 != nil {
 		return "", err2
 	}
@@ -429,7 +438,8 @@ func DetachDisk(vm, vgroup, lvname string) error {
 	url += "&lvname=" + lvname
 
 	log.Printf("GET: %s\n", url)
-	_, err := http.Get(url)
+	resp, err := http.Get(url)
+	defer resp.Body.Close()
 	if err != nil {
 		log.Printf("GETERROR: %s\n%v\n", url, err)
 		return err
@@ -450,7 +460,8 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 	url += "&mbpspergb=" + mbpspergb
 
 	log.Printf("GET: %s\n", url)
-	_, err := http.Get(url)
+	resp, err := http.Get(url)
+	defer resp.Body.Close()
 	if err != nil {
 		log.Printf("GETERROR: %s\n%v\n", url, err)
 	}
@@ -460,7 +471,8 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 func QosSync() error {
 	url := "http://localhost:3141/speedboat/claims/qossync"
 	log.Printf("GET: %s\n", url)
-	_, err := http.Get(url)
+	resp, err := http.Get(url)
+	defer resp.Body.Close()
 	if err != nil {
 		log.Printf("GETERROR: %s\n%v\n", url, err)
 	}

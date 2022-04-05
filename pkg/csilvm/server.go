@@ -687,50 +687,13 @@ func (s *Server) validateExistingVolume(lv *lvm.LogicalVolume, request *csi.Crea
 			err)
 	}
 	log.Printf("Volume path is %v", sourcePath)
-	existingFsType, err := determineFilesystemType(sourcePath)
-	if err != nil {
-		return status.Errorf(
-			codes.Internal,
-			"Cannot determine filesystem type: err=%v",
-			err)
-	}
-	log.Printf("Existing filesystem type is '%v'", existingFsType)
-	for _, volumeCapability := range request.GetVolumeCapabilities() {
-		if mnt := volumeCapability.GetMount(); mnt != nil {
-			// This is a MOUNT_VOLUME capability. We know that the
-			// requested filesystem type is supported on this host
-			// thanks to the request validation logic.
-			if existingFsType != "" {
-				// The volume has already been formatted with
-				// some filesystem. If the requested
-				// volume_capability.fs_type is different to
-				// the filesystem already on the volume, then
-				// this volume_capability is unsatisfiable
-				// using the existing volume and we return an
-				// error.
-				requestedFstype := mnt.GetFsType()
-				if requestedFstype != "" && requestedFstype != existingFsType {
-					// The existing volume is already
-					// formatted with a filesystem that
-					// does not match the requested
-					// volume_capability so it does not
-					// satisfy the request.
-					log.Printf("Existing volume does not satisfy request: fs_type != volume fs (%v != %v)", requestedFstype, existingFsType)
-					return ErrVolumeAlreadyExists
-				}
-				// The existing volume satisfies this
-				// volume_capability.
-			} else { //nolint: staticcheck
-				// The existing volume has not been formatted
-				// with a filesystem and can therefore satisfy
-				// this volume_capability (by formatting it
-				// with the specified fs_type, whatever it is).
-			}
-			// We ignore whether or not the volume_capability
-			// specifies readonly as any filesystem can be mounted
-			// readonly or not depending on how it gets published.
-		}
-	}
+	// Removed FS type check for mount compatibility for idempotency.
+	// If the agent takes too long servicing the first create volume,
+	// the orchestrator will issue a 2nd create.  following the old
+	// logic it would test FS type which fails because it LV is not active.
+	// Checking the mount capatibility during the create is wrong since the
+	// Server running the Controller could be a different OS than the node
+	// that the volume will be published on.
 	return nil
 }
 
