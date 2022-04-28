@@ -1,15 +1,9 @@
 # Update the README when this base image and/or the version of lvm2 (below) is updated.
-FROM centos:7.8.2003
+FROM rockylinux/rockylinux:8.4
 
-RUN yum install -y gcc-4.8.5 gcc-c++-4.8.5 make git util-linux xfsprogs file
+RUN yum install -y gcc gcc-c++ make git util-linux xfsprogs file libaio libaio-devel.x86_64
 
-RUN curl -O https://releases.pagure.org/libaio/libaio-0.3.110.tar.gz && \
-    curl https://releases.pagure.org/libaio/libaio-0.3.110.tar.gz.sha256sum | sha256sum --check && \
-    tar -xzvf libaio-0.3.110.tar.gz && \
-    cd libaio-0.3.110 && \
-    make install
-
-ARG LVM_VERSION=LVM2.2.02.187
+ARG LVM_VERSION=LVM2.2.03.13
 
 ENV LVM2_DOWNLOAD_URL https://www.sourceware.org/pub/lvm2/$LVM_VERSION.tgz
 
@@ -23,9 +17,9 @@ RUN curl -fsSL "$LVM2_DOWNLOAD_URL" -o $LVM_VERSION.tgz && \
       cd .. && \
       rm -f $LVM_VERSION.tgz
 
-ENV GOLANG_VERSION 1.15.11
+ENV GOLANG_VERSION 1.18.1
 ENV GOLANG_DOWNLOAD_URL https://golang.org/dl/go$GOLANG_VERSION.linux-amd64.tar.gz
-ENV GOLANG_DOWNLOAD_SHA256 8825b72d74b14e82b54ba3697813772eb94add3abf70f021b6bdebe193ed01ec
+ENV GOLANG_DOWNLOAD_SHA256 b3b815f47ababac13810fc6021eb73d65478e0b2db4b09d348eefad9581a2334
 
 RUN rm -rf /usr/local/go && \
       curl -fsSL "$GOLANG_DOWNLOAD_URL" -o golang.tar.gz && \
@@ -36,12 +30,8 @@ RUN rm -rf /usr/local/go && \
 ENV GOPATH /go
 ENV PATH /go/bin:$PATH
 ENV PATH /usr/local/go/bin:$PATH
-ENV GOLANGCI_LINT_VERSION v1.17.1
 
-RUN mkdir -p /go/src/github.com/golangci/ && \
-    cd /go/src/github.com/golangci && \
-    git clone https://github.com/golangci/golangci-lint.git --branch=$GOLANGCI_LINT_VERSION && \
-    go install -v github.com/golangci/golangci-lint/cmd/golangci-lint && \
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \ 
     mkdir -p /go/src/github.com/Seagate/csiclvm
 
 # We explicitly disable use of lvmetad as the cache appears to yield inconsistent results,

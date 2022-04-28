@@ -6,7 +6,7 @@ DOCKERFILE_MD5SUM=$(shell md5sum ./Dockerfile | cut -d" " -f1)
 DEV_DOCKER_IMAGE := csilvm_dev:$(DOCKERFILE_MD5SUM)
 
 PLUGIN_NAME ?= .speedboat.seagate.com
-PLUGIN_VERSION ?= v0.24-ovirt
+PLUGIN_VERSION ?= v0.24-stolake
 BUILD_TIME ?= $(shell date +"%Y%m%dT%H%M%S.%N%z")
 PACKAGE_SHA ?= nosha
 
@@ -61,7 +61,7 @@ check:
 	$(BUILD_PREFIX) sh -c "go build -v ./... && golangci-lint run -E=goimports -E=gofmt"
 
 build:
-	$(BUILD_PREFIX) go build -ldflags "$(LDFLAGS)" ./cmd/csilvm
+	$(BUILD_PREFIX) go build -ldflags "$(LDFLAGS)" -mod=mod ./cmd/csilvm
 
 gofmt:
 	$(BUILD_PREFIX) sh -c "find pkg -name '*.go' | xargs gofmt -s -w"
