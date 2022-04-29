@@ -400,7 +400,7 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 	}
 	args = append(args, opts.Flags()...)
 	args = append(args, "-ay")
-	args = append(args, "-y")  // Option to answer yes to wipe if LVM detects xfs signature at block 0
+	args = append(args, "-y") // Option to answer yes to wipe if LVM detects xfs signature at block 0
 	if err := run("lvcreate", nil, args...); err != nil {
 		if isInsufficientSpace(err) {
 			return nil, ErrNoSpace
@@ -945,25 +945,6 @@ func LookupPhysicalVolume(name string) (*PhysicalVolume, error) {
 // https://github.com/Jajcus/lvm2/blob/266d6564d7a72fcff5b25367b7a95424ccf8089e/lib/metadata/metadata.c#L983
 
 func run(cmd string, v interface{}, extraArgs ...string) error {
-	// Old Lock Check
-	//	// lvmlock can be nil, as it is a global variable that is intended to be
-	//	// initialized from calling code outside this package. We have no way of
-	//	// knowing whether the caller performed that initialization and must
-	//	// defensively check. In the future, we may decide to simply panic with a
-	//	// nil pointer dereference.
-	//	if lvmlock != nil {
-	//		// We use Lock instead of TryLock as we have no alternative way of
-	//		// making progress. We expect lvm2 command-line utilities invoked by
-	//		// this package to return within a reasonable amount of time.
-	//		if lerr := lvmlock.Lock(); lerr != nil {
-	//			return fmt.Errorf("lvm: acquire lock failed: %v", lerr)
-	//		}
-	//		defer func() {
-	//			if lerr := lvmlock.Unlock(); lerr != nil {
-	//				panic(fmt.Sprintf("lvm: release lock failed: %v", lerr))
-	//			}
-	//		}()
-	//	}
 	var args []string
 	if v != nil {
 		args = append(args, "--reportformat=json")
@@ -972,13 +953,13 @@ func run(cmd string, v interface{}, extraArgs ...string) error {
 	}
 	args = append(args, extraArgs...)
 	if virsh.ProxyMode() {
-		jbytes, err := virsh.ProxyRun(cmd, args...)
+		res, err := virsh.ProxyRun(cmd, args...)
 		if err != nil {
 			return fmt.Errorf("PROXY ERROR: %v", err)
 		}
 		if v != nil {
-			if err := json.Unmarshal(jbytes, v); err != nil {
-				return fmt.Errorf("%v: [%v]", err, string(jbytes))
+			if err := json.Unmarshal(res, v); err != nil {
+				return fmt.Errorf("%v: [%v]", err, res)
 			}
 		}
 	} else {

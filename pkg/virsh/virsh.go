@@ -8,8 +8,12 @@
 package virsh
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os/exec"
+	"time"
 
 	//"log"
 	"encoding/json"
@@ -17,13 +21,19 @@ import (
 	"errors"
 	"io/ioutil"
 	"log"
-	"net"
-	"net/http"
+
+	pb "github.com/Seagate/csiclvm/pkg/proto"
+	//pb  "seagit.okla.seagate.com/tyt-speedboat/stolake/proto"
+
 	"strings"
+
+	"github.com/go-logr/logr"
+	"google.golang.org/grpc"
 )
 
-// Global variable for the oVirt Host IP Address
-var HostIP string
+// Global variable for URL to StoLake agent
+var ProxyURL string
+var HostIP string // FIXME  Removing Mecury access
 
 type basicError string
 
@@ -79,6 +89,27 @@ type mercinfo struct {
 	Version    string `json:"version"`
 }
 
+type Stolakeclient struct {
+	Client     pb.StolakeClient
+	ClientConn *grpc.ClientConn
+	Log        logr.Logger
+} // stolakeclient
+
+const TIMEOUT = 60 * time.Second //gRPC Timeout Call limit
+func callMercProxy(sc *Stolakeclient, cmd string, args []string) (*pb.MercProxyRes, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+	defer cancel()
+	req := &pb.MercProxyReq{
+		Cmd:  cmd,
+		Args: args,
+	}
+	r, err := sc.Client.MercuryProxy(ctx, req)
+	if err != nil {
+		log.Print(err.Error())
+	}
+	return r, err
+}
+
 func HostConfig(ip string) (mercinfo, error) {
 	var info mercinfo
 	resp, err := http.Get("http://" + ip + ":3141/")
@@ -96,6 +127,25 @@ func HostConfig(ip string) (mercinfo, error) {
 
 // Function makes LVM call through Mercury Agent on oVrit Host
 func ProxyRun(cmd string, args ...string) ([]byte, error) {
+	log.Printf("PROXYURL: %s %s \n", ProxyURL, ProxyURL[0:5])
+	if ProxyURL[0:5] == "unix:" {
+		log.Printf("PROXY: %s %v \n", cmd, args)
+		conn, err := grpc.Dial(ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			log.Fatalf("did not connect: %v", err)
+		}
+		defer conn.Close()
+		c := pb.NewStolakeClient(conn)
+		sc := &Stolakeclient{
+			Client:     c,
+			ClientConn: conn,
+		}
+		res, err := callMercProxy(sc, cmd, args)
+		return []byte(res.GetStdout()), err
+	}
+	//FIXME DEBUG Exit
+	return nil, nil
+
 	runargs := ""
 	for _, arg := range args {
 		// Assume tilda is a save delimeter
@@ -118,21 +168,22 @@ func ProxyRun(cmd string, args ...string) ([]byte, error) {
 	return jbytes, nil
 }
 
-func SetHostIP(ip string) bool {
-	if net.ParseIP(ip) != nil {
-		HostIP = ip
-		return true
+func SetProxyURL(urlstr string) bool {
+	_, err := url.Parse(urlstr)
+	if err != nil {
+		ProxyURL = ""
+		return false
 	}
-	HostIP = ""
-	return false
+	ProxyURL = urlstr
+	return true
 }
 
-func OvirtIP() string {
-	return HostIP
+func GetProxyURL() string {
+	return ProxyURL
 }
 
 func ProxyMode() bool {
-	if HostIP == "" {
+	if ProxyURL == "" {
 		return false
 	}
 	return true
