@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/klog"
 )
 
 const (
@@ -1085,6 +1086,13 @@ func (s *Server) ControllerExpandVolume(
 	return nil, ErrCallNotImplemented
 }
 
+func (s *Server) ControllerGetVolume(
+	ctx context.Context,
+	request *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
+	log.Printf("ControllerGetVolume not supported")
+	return nil, ErrCallNotImplemented
+}
+
 // NodeService RPCs
 
 func (s *Server) NodeStageVolume(
@@ -1175,6 +1183,35 @@ func (s *Server) NodePublishVolume(
 		}
 	default:
 		panic(fmt.Sprintf("lvm: unknown access_type: %+v", accessType))
+	}
+
+	// Set Group ID on Mount target
+	mountGroup := request.GetVolumeCapability().GetMount().GetVolumeMountGroup()
+	log.Printf("DBG Vol Mount Group = %s for %s\n", mountGroup, targetPath)
+	if mountGroup != "" {
+		if gid, err := strconv.Atoi(mountGroup); err == nil {
+			err := os.Chown(targetPath, -1, gid)
+			if err != nil {
+				fmt.Printf("WARNING MountGroup chown to %d failed. \n", gid)
+			}
+			_, err = exec.Command("chmod", "g+rwx", targetPath).CombinedOutput()
+			if err != nil {
+				log.Printf("ERROR setting g_rwx on %s \n%v\n", targetPath, err)
+			}
+		} else {
+			fmt.Printf("WARNING MountGroup %s isn't a number.\n", mountGroup)
+		}
+	}
+	fi, _ := os.Stat(targetPath)
+	log.Printf("DBG STAT OF: %s\n  %+v\n", targetPath, fi)
+
+	// Open mount to all users.  Used for debugging or pods not match user and fsuser
+	allusers, aok := pubcontext["allusers"]
+	if aok || allusers == "true" {
+		_, err := exec.Command("chmod", "ugo+rwx", targetPath).CombinedOutput()
+		if err != nil {
+			log.Printf("ERROR setting ugo_rwx on %s \n%v\n", targetPath, err)
+		}
 	}
 
 	// Set QOS
@@ -1322,7 +1359,7 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 		log.Printf("Checking Mount Target  %v ", targetPath)
 		if _, err := os.Stat(targetPath); err != nil {
 			log.Printf("Creating Mount Target  %v ", targetPath)
-			if err := os.Mkdir(targetPath, 0755); err != nil {
+			if err := os.Mkdir(targetPath, 0770); err != nil {
 				return status.Errorf(
 					codes.Internal,
 					"Cannot create mount target %v: err=%v",
@@ -1563,9 +1600,24 @@ func (s *Server) checkVolumeGroupTags(tags []string) error {
 func (s *Server) NodeGetCapabilities(
 	ctx context.Context,
 	request *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
-	response := &csi.NodeGetCapabilitiesResponse{}
-	defer virsh.QosSync()
-	return response, nil
+	var csc []*csi.NodeServiceCapability
+	cl := []csi.NodeServiceCapability_RPC_Type{
+		//TODO://csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+		csi.NodeServiceCapability_RPC_VOLUME_MOUNT_GROUP,
+	}
+
+	for _, cap := range cl {
+		klog.V(4).Infof("enabled node service capability: %v", cap.String())
+		csc = append(csc, &csi.NodeServiceCapability{
+			Type: &csi.NodeServiceCapability_Rpc{
+				Rpc: &csi.NodeServiceCapability_RPC{
+					Type: cap,
+				},
+			},
+		})
+	}
+
+	return &csi.NodeGetCapabilitiesResponse{Capabilities: csc}, nil
 }
 
 // takeVolumeLayoutFromParameters removes and returns RAID-related parameters from the input.

@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/DataDog/datadog-go v2.2.0+incompatible
 	github.com/cactus/go-statsd-client v3.1.1+incompatible
-	github.com/container-storage-interface/spec v1.2.0
+	github.com/container-storage-interface/spec v1.6.0
 	github.com/go-logr/logr v1.2.3
 	github.com/gofrs/flock v0.7.1
 	github.com/golang/protobuf v1.5.2
@@ -19,4 +19,5 @@ require (
 	google.golang.org/grpc v1.46.0
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/freddierice/go-losetup.v1 v1.0.0-20170407175016-fc9adea44124
+	k8s.io/klog v1.0.0
 )

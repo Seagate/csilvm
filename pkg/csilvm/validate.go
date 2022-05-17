@@ -350,6 +350,12 @@ func (v *controllerServerValidator) ControllerExpandVolume(
 	return v.inner.ControllerExpandVolume(ctx, request)
 }
 
+func (v *controllerServerValidator) ControllerGetVolume(
+	ctx context.Context,
+	request *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
+	return v.inner.ControllerGetVolume(ctx, request)
+}
+
 // NodeService RPCs
 
 type nodeServerValidator struct {

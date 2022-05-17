@@ -125,47 +125,23 @@ func HostConfig(ip string) (mercinfo, error) {
 	return info, nil
 }
 
-// Function makes LVM call through Mercury Agent on oVrit Host
-func ProxyRun(cmd string, args ...string) ([]byte, error) {
-	log.Printf("PROXYURL: %s %s \n", ProxyURL, ProxyURL[0:5])
-	if ProxyURL[0:5] == "unix:" {
-		log.Printf("PROXY: %s %v \n", cmd, args)
-		conn, err := grpc.Dial(ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
-		if err != nil {
-			log.Fatalf("did not connect: %v", err)
-		}
-		defer conn.Close()
-		c := pb.NewStolakeClient(conn)
-		sc := &Stolakeclient{
-			Client:     c,
-			ClientConn: conn,
-		}
-		res, err := callMercProxy(sc, cmd, args)
-		return []byte(res.GetStdout()), err
-	}
-	//FIXME DEBUG Exit
-	return nil, nil
-
-	runargs := ""
-	for _, arg := range args {
-		// Assume tilda is a save delimeter
-		runargs += arg + "~"
-	}
-	runargs = strings.TrimSuffix(runargs, "~")
-	url := "http://" + HostIP + ":3141/speedboat/lvm/run?lvmcmd=" + cmd + "&lvmargs=" + runargs
-	log.Printf("GET: %s\n", url)
-	//resp, err := http.Get("http://" + HostIP + ":3141/speedboat/virsh/run?lvmcmd=" + cmd + "&lvmargs=" + runargs)
-	resp, err := http.Get(url)
+// Function makes LVM call through StoLake Agent on base Operating System
+//func ProxyRun(cmd string, args ...string) ([]byte, error) {
+func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
+	//log.Printf("PROXY: %s %v \n", cmd, args)
+	conn, err := grpc.Dial(ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Printf("GETERROR: %s\n%v\n", url, err)
+		log.Printf("FAILED to connect to Proxy at %s \n", ProxyURL)
 		return nil, err
 	}
-	jbytes, err2 := ioutil.ReadAll(resp.Body)
-	defer resp.Body.Close()
-	if err2 != nil {
-		return nil, err2
+	defer conn.Close()
+	c := pb.NewStolakeClient(conn)
+	sc := &Stolakeclient{
+		Client:     c,
+		ClientConn: conn,
 	}
-	return jbytes, nil
+	res, err := callMercProxy(sc, cmd, args)
+	return []byte(res.GetStdout()), err
 }
 
 func SetProxyURL(urlstr string) bool {
@@ -183,10 +159,36 @@ func GetProxyURL() string {
 }
 
 func ProxyMode() bool {
+	if ProxyURL == "none" {
+		return false
+	}
 	if ProxyURL == "" {
 		return false
 	}
 	return true
+}
+
+// Function makes LVM call through Mercury Agent on oVrit Host
+func ProxyRun(cmd string, args ...string) ([]byte, error) {
+	runargs := ""
+	for _, arg := range args {
+		// Assume tilda is a save delimeter
+		runargs += arg + "~"
+	}
+	runargs = strings.TrimSuffix(runargs, "~")
+	url := "http://" + HostIP + ":3141/speedboat/lvm/run?lvmcmd=" + cmd + "&lvmargs=" + runargs
+	log.Printf("GET: %s\n", url)
+	//resp, err := http.Get("http://" + HostIP + ":3141/speedboat/virsh/run?lvmcmd=" + cmd + "&lvmargs=" + runargs)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("GETERROR: %s\n%v\n", url, err)
+		return nil, err
+	}
+	jbytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return nil, err2
+	}
+	return jbytes, nil
 }
 
 // FIXME Not Used yet
