@@ -204,7 +204,7 @@ func main() {
 	)
 	pxyurl := *proxyurlF
 	if !virsh.SetProxyURL(pxyurl) {
-		logger.Printf("Invalid StoLake Proxy URL.  Not Running Proxy Mode")
+		logger.Fatalf("Invalid StoLake Proxy URL. ")
 	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	opts := []csilvm.ServerOpt{

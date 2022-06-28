@@ -12,11 +12,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"time"
 
 	//"log"
-	"encoding/json"
+	//"encoding/json"
 	"encoding/xml"
 	"errors"
 	"io/ioutil"
@@ -110,20 +111,20 @@ func callMercProxy(sc *Stolakeclient, cmd string, args []string) (*pb.MercProxyR
 	return r, err
 }
 
-func HostConfig(ip string) (mercinfo, error) {
-	var info mercinfo
-	resp, err := http.Get("http://" + ip + ":3141/")
-	if err != nil {
-		return info, err
-	}
-	jbytes, err2 := ioutil.ReadAll(resp.Body)
-	defer resp.Body.Close()
-	if err2 != nil {
-		return info, err2
-	}
-	json.Unmarshal(jbytes, &info)
-	return info, nil
-}
+//func HostConfig(ip string) (mercinfo, error) {
+//	var info mercinfo
+//	resp, err := http.Get("http://" + ip + ":3141/")
+//	if err != nil {
+//		return info, err
+//	}
+//	jbytes, err2 := ioutil.ReadAll(resp.Body)
+//	defer resp.Body.Close()
+//	if err2 != nil {
+//		return info, err2
+//	}
+//	json.Unmarshal(jbytes, &info)
+//	return info, nil
+//}
 
 // Function makes LVM call through StoLake Agent on base Operating System
 //func ProxyRun(cmd string, args ...string) ([]byte, error) {
@@ -148,6 +149,12 @@ func SetProxyURL(urlstr string) bool {
 	_, err := url.Parse(urlstr)
 	if err != nil {
 		ProxyURL = ""
+		log.Printf("FAILED StoLake URL Invalid %s \n", urlstr)
+		return false
+	}
+	_, err = os.Stat(urlstr)
+	if err != nil {
+		log.Printf("FAILED StoLake URL %s does not exist \n", urlstr)
 		return false
 	}
 	ProxyURL = urlstr
