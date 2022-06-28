@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: csiclvm-agents
+spec:
+  selector:
+    matchLabels:
+      app: csiclvmagent # has to match .spec.template.metadata.labels
+  serviceName: "csiclvm"
+  replicas: 1 
+  template:
+    metadata:
+      labels:
+        app: csiclvmagent # has to match .spec.selector.matchLabels
+    spec:
+      terminationGracePeriodSeconds: 10
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                    - csiclvm
+              topologyKey: "kubernetes.io/hostname"
+      nodeSelector:
+         storagelake: controller
+      containers:
+      - image: ghcr.io/tprohofsky/csiclvm:dev
+        imagePullPolicy: Always
+        name: csiclvm
+        env:
+        - name: CSI_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CSI_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        volumeMounts:
+          - mountPath: /var/run/stolake
+            name: stolakesocket
+        command: ["/stolake/csilvm"]
+        args: ["-proxy", "/var/run/stolake"]
+      volumes:
+      - name: stolakesocket
+        hostPath:
+          path: /var/lib/kubelet/device-plugins/stolake.seagate.sock
+          type: Socket
