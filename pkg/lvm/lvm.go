@@ -953,7 +953,7 @@ func run(cmd string, v interface{}, extraArgs ...string) error {
 	}
 	args = append(args, extraArgs...)
 	if virsh.ProxyMode() {
-		res, err := virsh.ProxyRun(cmd, args...)
+		res, err := virsh.ProxyStoLakeRun(cmd, args...)
 		if err != nil {
 			return fmt.Errorf("PROXY ERROR: %v", err)
 		}

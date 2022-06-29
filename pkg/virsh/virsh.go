@@ -10,20 +10,19 @@ package virsh
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"time"
 
-	//"log"
 	//"encoding/json"
 	"encoding/xml"
 	"errors"
 	"io/ioutil"
-	"log"
 
-	pb "github.com/Seagate/csiclvm/pkg/proto"
+	pb  "github.com/Seagate/csiclvm/pkg/stolake"
 	//pb  "seagit.okla.seagate.com/tyt-speedboat/stolake/proto"
 
 	"strings"
@@ -35,6 +34,8 @@ import (
 // Global variable for URL to StoLake agent
 var ProxyURL string
 var HostIP string // FIXME  Removing Mecury access
+
+var logger logr.Logger
 
 type basicError string
 
@@ -96,52 +97,32 @@ type Stolakeclient struct {
 	Log        logr.Logger
 } // stolakeclient
 
-const TIMEOUT = 60 * time.Second //gRPC Timeout Call limit
-func callMercProxy(sc *Stolakeclient, cmd string, args []string) (*pb.MercProxyRes, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
-	defer cancel()
+const TIMEOUT = 6 * time.Second //gRPC Timeout Call limit
+
+func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
+	//CSICheck()
+	log.Printf("SOCKET %s \n", ProxyURL)
+	log.Printf("STOLAKEPROXY: %s %v \n", cmd, args)
+
+        sc, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        } else {
+                log.Printf("Connected to StoLake gRPC Server")
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
 	req := &pb.MercProxyReq{
 		Cmd:  cmd,
 		Args: args,
 	}
-	r, err := sc.Client.MercuryProxy(ctx, req)
+	res, err := sc.Client.MercuryProxy(ctx, req)
+        defer sc.ClientConn.Close()
 	if err != nil {
 		log.Print(err.Error())
 	}
-	return r, err
-}
-
-//func HostConfig(ip string) (mercinfo, error) {
-//	var info mercinfo
-//	resp, err := http.Get("http://" + ip + ":3141/")
-//	if err != nil {
-//		return info, err
-//	}
-//	jbytes, err2 := ioutil.ReadAll(resp.Body)
-//	defer resp.Body.Close()
-//	if err2 != nil {
-//		return info, err2
-//	}
-//	json.Unmarshal(jbytes, &info)
-//	return info, nil
-//}
-
-// Function makes LVM call through StoLake Agent on base Operating System
-//func ProxyRun(cmd string, args ...string) ([]byte, error) {
-func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
-	//log.Printf("PROXY: %s %v \n", cmd, args)
-	conn, err := grpc.Dial(ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("FAILED to connect to Proxy at %s \n", ProxyURL)
-		return nil, err
-	}
-	defer conn.Close()
-	c := pb.NewStolakeClient(conn)
-	sc := &Stolakeclient{
-		Client:     c,
-		ClientConn: conn,
-	}
-	res, err := callMercProxy(sc, cmd, args)
+	log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	return []byte(res.GetStdout()), err
 }
 
@@ -198,41 +179,8 @@ func ProxyRun(cmd string, args ...string) ([]byte, error) {
 	return jbytes, nil
 }
 
-// FIXME Not Used yet
-type vginfo struct {
-	FreeBytes string `json:"FreeBytes"`
-	LVCount   string `json:"LVCount"`
-	PartCount string `json:"PartCount"`
-	UsedBytes string `json:"UsedBytes"`
-	CsiStatus string `json:"csistatus"`
-	VgLock    string `json:"vglock"`
-	vgroup    string `json:"vgroup"`
-}
-
-func LookupVolumeGroup(vg, ip string) (string, error) {
-	if vg[0:5] != "sbvg_" {
-		return "", fmt.Errorf("Not Valid Speedboat Volume Group %s\n", vg)
-	}
-	get, err := http.Get("http://" + ip + ":3141/speedboat/tenant/join?tenantname=" + vg[5:])
-	if err != nil {
-		return "", err
-	}
-	defer get.Body.Close()
-	//log.Printf("GET: %+v", get)
-	if get.StatusCode != 200 {
-		return "", fmt.Errorf("Tenant Join Failed")
-	}
-
-	jbytes, err2 := ioutil.ReadAll(get.Body)
-	defer get.Body.Close()
-	if err2 != nil {
-		return "", err2
-	}
-	log.Printf("%s", jbytes)
-	//found.name =  vg
-	return vg, nil
-}
-
+// OLD Code 
+// FIXME Add VM support ot StoLake and rewrite these functions
 // Test if virtual machine exists
 func IsDomValid(dom string) bool {
 	url := "http://" + HostIP + ":3141/speedboat/virsh/run?args=domid~" + dom
@@ -592,6 +540,64 @@ func BlkID(blkdev string) (string, error) {
 	}
 	return "", errors.New("Can't find blockid device on host")
 }
+
+
+func connect() (*Stolakeclient, error) {
+        // Set up a connection to the server.
+        conn, err := grpc.Dial("unix://"+ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
+        if err != nil {
+                logger.Error(err, "Failed to connect to Server")
+        }
+        c := pb.NewStolakeClient(conn)
+
+        sc := new(Stolakeclient)
+        sc = &Stolakeclient{
+                Client:     c,
+                ClientConn: conn,
+        }
+
+        return sc, err
+}
+
+func disconnect(sc *Stolakeclient) error {
+        err := sc.ClientConn.Close()
+        return err
+}
+
+
+
+func CSICheck() {
+        cli, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        } else {
+                log.Printf("Connection to gRPC Server Established !!")
+        }
+
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+        req := &pb.GetInfoReq{}
+
+        res, err := cli.Client.RetrieveInfo(ctx, req)
+        if err != nil {
+                log.Printf("RetrieveInfo call Failed \n %v",err)
+        } else {
+                log.Printf(fmt.Sprintf("AGENT INFO: %+v", res))
+        }
+
+
+        disConnErr := disconnect(cli)
+        if disConnErr != nil {
+                log.Printf("Disconnect from Server Failed\n%v\n",disConnErr)
+        } else {
+                log.Printf("Disconnected from gRPC Server !!")
+        }
+}
+
+
+
+
 
 func main() {
 	pools := ListAllPools()
