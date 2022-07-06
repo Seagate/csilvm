@@ -39,6 +39,7 @@ type Server struct {
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
 	removingVolumeGroup  bool
+	controllerMode       bool
 	ovirtHost            string
 	tags                 []string
 	probeModules         map[string]struct{}
@@ -97,6 +98,10 @@ func (s *Server) RemovingVolumeGroup() bool {
 	return s.removingVolumeGroup
 }
 
+func (s *Server) ControllerMode() bool {
+	return s.controllerMode
+}
+
 func (s *Server) OvirtHost() string {
 	return s.ovirtHost
 }
@@ -136,6 +141,14 @@ func RemoveVolumeGroup() ServerOpt {
 		s.removingVolumeGroup = true
 	}
 }
+
+// ControllerMode configures the Server to operate as CSI Controller Agent.
+func ControllerMode() ServerOpt {
+	return func(s *Server) {
+		s.controllerMode = true
+	}
+}
+
 
 // Tag configures the volume group with the specified tag. Any volumes
 // that are created will be tagged with the volume group tags.
@@ -231,12 +244,16 @@ func (s *Server) GetPluginInfo(
 func (s *Server) GetPluginCapabilities(
 	ctx context.Context,
 	request *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
+	agentmode := csi.PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS
+	if s.controllerMode {
+		agentmode = csi.PluginCapability_Service_CONTROLLER_SERVICE
+	}
 	response := &csi.GetPluginCapabilitiesResponse{
 		Capabilities: []*csi.PluginCapability{
 			{
 				Type: &csi.PluginCapability_Service_{
 					Service: &csi.PluginCapability_Service{
-						Type: csi.PluginCapability_Service_CONTROLLER_SERVICE,
+						Type: agentmode,
 					},
 				},
 			},
@@ -281,46 +298,14 @@ func (s *Server) Probe(
 		return response, nil
 	}
 	log.Printf("Looking up volume group %v", s.vgname)
-	volumeGroup, err := lvm.LookupVolumeGroup(s.vgname)
+	_, err := lvm.LookupVolumeGroup(s.vgname)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.FailedPrecondition,
 			"Cannot find volume group %v",
 			s.vgname)
 	}
-	log.Printf("Looking up physical volumes")
-	var pverrs []error
-	for _, pvname := range s.pvnames {
-		// Check that the LVM2 metadata written to the start of the PV
-		// parses. There are reasonable scenarios where the list of
-		// PVs that comprise a VG might contain unexpected PVs or PVs
-		// that are unhealthy. Since the Probe call does not
-		// distinguish between DEGRADED and FAILED, we have no choice
-		// but to log an error but proceed without returning one.
-		log.Printf("Looking up LVM2 physical volume %v", pvname)
-		_, pverr := lvm.LookupPhysicalVolume(pvname)
-		if pverr != nil {
-			log.Printf("Cannot lookup physical volume %v: err=%v",
-				pvname, pverr)
-			pverrs = append(pverrs, pverr)
-		}
-	}
-	s.metrics.Gauge("lookup-pv-errs").Update(float64(len(pverrs)))
-	log.Printf("Comparing expected PVs with actual PVs")
-	existing, err := volumeGroup.ListPhysicalVolumeNames()
-	if err != nil {
-		return nil, fmt.Errorf(
-			"Cannot list physical volumes: err=%v",
-			err)
-	}
-	missing, unexpected := calculatePVDiff(existing, s.pvnames)
-	if len(missing) != 0 || len(unexpected) != 0 {
-		log.Printf("Volume group contains unexpected PVs %v and is missing PVs %v",
-			unexpected, missing)
-	}
-	s.metrics.Gauge("pvs").Update(float64(len(existing)))
-	s.metrics.Gauge("unexpected-pvs").Update(float64(len(unexpected)))
-	s.metrics.Gauge("missing-pvs").Update(float64(len(missing)))
+
 	response := &csi.ProbeResponse{}
 	return response, nil
 }

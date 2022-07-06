@@ -65,6 +65,7 @@ func main() {
 	socketFileF := flag.String("unix-addr", "", "The path to the listening unix socket file")
 	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
 	removeF := flag.Bool("remove-volume-group", false, "If set, the volume group will be removed when ProbeNode is called.")
+	controllerF := flag.Bool("controller", false, "If set, the agent will server operat as both a node and controller agent.")
 	var tagsF stringsFlag
 	flag.Var(&tagsF, "tag", "Value to tag the volume group with (can be given multiple times)")
 	var probeModulesF stringsFlag
@@ -86,6 +87,10 @@ func main() {
 	logger := log.New(os.Stderr, logprefix, logflags)
 	csilvm.SetLogger(logger)
 	lvm.SetLogger(logger)
+	// Specifying the VG is mandatory to start server.
+	if  *vgnameF == "" {
+		logger.Fatalf("FAILED TO START: volume-group is not specified starting CSI Agent.")
+	}
 	// Setup LVM operation lock file.
 	// See
 	// - https://jira.mesosphere.com/browse/DCOS_OSS-5434
@@ -217,6 +222,9 @@ func main() {
 	)
 	if *removeF {
 		opts = append(opts, csilvm.RemoveVolumeGroup())
+	}
+	if *controllerF {
+		opts = append(opts, csilvm.ControllerMode())
 	}
 	for _, tag := range tagsF {
 		opts = append(opts, csilvm.Tag(tag))

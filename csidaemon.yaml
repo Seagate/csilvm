@@ -1,13 +1,11 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: DaemonSet
 metadata:
-  name: csiclvm-agents
+  name: csiclvm-controllers
 spec:
   selector:
     matchLabels:
       app: csiclvmagent # has to match .spec.template.metadata.labels
-  serviceName: "csiclvm"
-  replicas: 1 
   template:
     metadata:
       labels:
@@ -15,17 +13,14 @@ spec:
     spec:
       terminationGracePeriodSeconds: 10
       affinity:
-        podAntiAffinity:
+        nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: "app"
-                    operator: In
-                    values:
-                    - csiclvm
-              topologyKey: "kubernetes.io/hostname"
-      nodeSelector:
-         storagelake: controller
+            nodeSelectorTerms:
+            - matchExpressions:
+                - key: storagelake
+                  operator: In
+                  values:
+                  - controller
       containers:
       - image: ghcr.io/tprohofsky/csiclvm:dev
         imagePullPolicy: Always
@@ -42,10 +37,16 @@ spec:
         volumeMounts:
           - mountPath: /var/run/stolake
             name: stolakesocket
+          - mountPath: /var/lib/kubelet/plugins
+            name: csisocketdir
         command: ["/stolake/csilvm"]
-        args: ["-proxy", "/var/run/stolake"]
+        args: ["-controller", "-proxy", "/var/run/stolake", "-volume-group", "sbvg_datalake", "-unix-addr=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock", "-node-id", spec.nodeName ]
       volumes:
       - name: stolakesocket
         hostPath:
           path: /var/lib/kubelet/device-plugins/stolake.seagate.sock
           type: Socket
+      - name: csisocketdir
+        hostPath:
+          path: /var/lib/kubelet/plugins
+          type: DirectoryOrCreate
