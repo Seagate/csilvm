@@ -1360,6 +1360,7 @@ func (s *Server) NodeUnpublishVolume(
 	lv, err := s.volumeGroup.LookupLogicalVolume(id)
 	response := &csi.NodeUnpublishVolumeResponse{}
 	if err != nil {
+		lv.Deactivate()
 		// Repond good if not found for idempotency
 		return response, nil
 	}
@@ -1368,7 +1369,9 @@ func (s *Server) NodeUnpublishVolume(
 	targetPath := request.GetTargetPath()
 
 	if virsh.ProxyMode() {
-		return response, virsh.UnMountVolume(targetPath)
+		err :=  virsh.UnMountVolume(targetPath)
+		lv.Deactivate()
+		return response, err
 	}
 
 	mp, err := getMountAt(targetPath)
