@@ -49,6 +49,12 @@ service stolake {
 
     // Mercury Services for CSI driver
     rpc MercuryProxy(MercProxyReq) returns (MercProxyRes);
+    rpc FileSystemType(FileSystemTypeReq) returns (FileSystemTypeRes);
+    rpc MountInfo(MountInfoReq) returns (MountInfoRes);
+    rpc MountVolume(MountVolumeReq) returns (MountVolumeRes);
+    rpc UnMountVolume(UnMountVolumeReq) returns (UnMountVolumeRes);
+    rpc LvQoS(LvQoSReq) returns (LvQoSRes);
+
 
     // RAID Health services
     rpc RetrieveTopLevelLogicalVol(ScanReq) returns (TopLvScanRes);
@@ -245,6 +251,65 @@ message MercProxyRes {
     string Stdout = 1;
     string Stderr = 2;
 }
+
+
+message FileSystemTypeReq {
+    // Returns the discoverable file system type of the block device
+    string DevPath = 1;
+}
+
+message FileSystemTypeRes {
+    // Returns "" if no file system is detected or the type of file system
+    string FsType = 1;
+}
+
+message MountInfoReq {}
+
+message MountInfoRes {
+    // Returns contents of /proc/self/mountinfo
+    string Info = 1;
+}
+
+message MountVolumeReq {
+    // Source path must start with /dev/
+    string SourcePath = 1;
+    // Target path must start with /var/lib/kubelet/pods
+    string TargetPath = 2;
+    // Valid File system types are xfs, ext2, ext3, fat and block for no file system
+    string FsType = 3;
+    // Mount Read Only. Default is false.
+    bool ReadOnly = 4;
+    // Comma seperated string of mount options
+    string MountOptions = 5;
+    // GroupID to be set for the mount target
+    string GroupId = 6;
+    // Set user permission ugo+rwx on target 
+    bool AllUsers = 7;
+}
+
+
+message MountVolumeRes {
+    string Stdout = 1;
+}
+
+message UnMountVolumeReq {
+    string TargetPath = 1;
+}
+
+message UnMountVolumeRes {
+    string Stdout = 1;
+}
+
+message LvQoSReq {
+    // Target Path of LV block device. (/dev/vgname/lvname)
+    string TargetPath = 1;
+    // IOPS per GB throttling limit
+    string IOPSperGB = 2;
+    // MB/s per GB throttling limit
+    string MBpSperGB = 3;
+}
+
+message LvQoSRes {}
 
 message GetSedRes {
     repeated Udev AllList = 1;

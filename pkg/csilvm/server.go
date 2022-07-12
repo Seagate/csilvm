@@ -478,6 +478,13 @@ func (s *Server) CreateVolume(
 	if okk {
 		attr["mbpspergb"] = mbpspergb
 	}
+	// Pass on datapath mode for ControllerPublish
+	datapath, okkk := params["datapath"]
+	if okkk {
+		attr["datapath"] = strings.ToLower(datapath)
+	} else {
+		attr["datapath"] = "direct" 
+	}
 
 	defer s.reportStorageMetrics()
 	response := &csi.CreateVolumeResponse{
@@ -607,6 +614,7 @@ func deleteDataOnDevice(devicePath string) error {
 }
 
 var ErrCallNotImplemented = status.Error(codes.Unimplemented, "That RPC is not implemented.")
+var ErrUnsupportDatapath = status.Error(codes.NotFound, "The datapath mode is not supported.")
 
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
@@ -614,11 +622,20 @@ func (s *Server) ControllerPublishVolume(
 
 	// Pass QOS from Volume Context from Vol Create in Publish Context
 	pubcontext := dupParams(req.GetVolumeContext())
-	if !virsh.ProxyMode() {
+
+//	if !virsh.ProxyMode() {
+//		pubcontext["blockid"] = "notneeded"
+//		response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
+//		return response, nil
+//	}
+	// 
+	if  pubcontext["datapath"] == "direct" {
 		pubcontext["blockid"] = "notneeded"
 		response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
 		return response, nil
 	}
+
+
 	volumeID := req.GetVolumeId()
 	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "no volume ID provided")
@@ -639,33 +656,52 @@ func (s *Server) ControllerPublishVolume(
 		return nil, ErrVolumeNotFound
 	}
 	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeID)
-	//Validate Domain Name
-	if !virsh.IsDomValid(nodeID) {
-		return nil, status.Error(codes.NotFound, "Unknown nodeid doesn't map to oVirt DOM.")
-	}
-	// Not using virsh pools because it doesn't activate VGs with shared locks
-	// Assume VG is started with shared locks.
 
-	// Perform Mapping of vg/lv in to VM block device
-	blkid, err2 := virsh.AttachDisk(nodeID, s.vgname, volumeID)
-	if err2 != nil {
-		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
-		return nil, status.Error(codes.Internal, msg)
+	switch pubcontext["datapath"] {
+		case "iscsi": {
+			return nil, ErrUnsupportDatapath
+		}
+		case "nvme":
+			return nil, ErrUnsupportDatapath
+		case "qemu":
+			return nil, ErrUnsupportDatapath
+		default:
+			return nil, ErrUnsupportDatapath
 	}
-	pubcontext["blockid"] = blkid
-	response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
-	return response, nil
+	return nil, ErrUnsupportDatapath
+
+//	//Validate Domain Name
+//	if !virsh.IsDomValid(nodeID) {
+//		return nil, status.Error(codes.NotFound, "Unknown nodeid doesn't map to oVirt DOM.")
+//	}
+//	// Not using virsh pools because it doesn't activate VGs with shared locks
+//	// Assume VG is started with shared locks.
+//
+//	// Perform Mapping of vg/lv in to VM block device
+//	blkid, err2 := virsh.AttachDisk(nodeID, s.vgname, volumeID)
+//	if err2 != nil {
+//		msg := fmt.Sprintf("Failed to Attach %s to %s\n%v\n", s.vgname, volumeID, err2)
+//		return nil, status.Error(codes.Internal, msg)
+//	}
+//	pubcontext["blockid"] = blkid
+//	response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
+//	return response, nil
 
 }
 
 func (s *Server) ControllerUnpublishVolume(
 	ctx context.Context,
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+	
+	// FIXME: Need to discover how the volume is published to the node and undo it		
+	return  &csi.ControllerUnpublishVolumeResponse{}, nil
 
 	if !virsh.ProxyMode() {
 		response := &csi.ControllerUnpublishVolumeResponse{}
 		return response, nil
 	}
+
+
 	//Validate Domain Name
 	nodeid := request.GetNodeId()
 	if nodeid == "" {
@@ -978,9 +1014,7 @@ func (s *Server) NodePublishVolume(
 	id := request.GetVolumeId()
 	pubcontext := request.GetPublishContext()
 	sourcePath := ""
-	if virsh.ProxyMode() {
-		sourcePath = "/dev/" + pubcontext["blockid"]
-	} else {
+	if pubcontext["datapath"] == "direct" {
 		log.Printf("Looking up volume with id=%v", id)
 		lv, err := s.volumeGroup.LookupLogicalVolume(id)
 		if err != nil {
@@ -1000,6 +1034,9 @@ func (s *Server) NodePublishVolume(
 				"Failed to activate volume: err=%v",
 				err)
 		}
+	} else {
+		//FIXME: Add support for nondirect datapaths
+		sourcePath = "/dev/" + pubcontext["blockid"]
 	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
@@ -1007,48 +1044,29 @@ func (s *Server) NodePublishVolume(
 	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
 	readonly = readonly || request.GetReadonly()
 	log.Printf("Mounting readonly: %v", readonly)
+	mountGroup := request.GetVolumeCapability().GetMount().GetVolumeMountGroup()
+	allusrs, aok := pubcontext["allusers"]
+	allusers :=  aok && strings.ToLower(allusrs) == "true"
 	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
 	case *csi.VolumeCapability_Block:
+		if virsh.ProxyMode() {
+			return &csi.NodePublishVolumeResponse{}, virsh.MountVolume(sourcePath, targetPath, "block", mountGroup, "", readonly, allusers )
+		}
 		if err := s.nodePublishVolume_Block(sourcePath, targetPath, readonly); err != nil {
 			return nil, err
 		}
 	case *csi.VolumeCapability_Mount:
 		fstype := request.GetVolumeCapability().GetMount().GetFsType()
 		mountOptions := request.GetVolumeCapability().GetMount().GetMountFlags()
-		if err := s.nodePublishVolume_Mount(sourcePath, targetPath, readonly, fstype, mountOptions); err != nil {
+		mountOptionsStr := strings.Join(mountOptions, ",")
+		if virsh.ProxyMode() {
+			return &csi.NodePublishVolumeResponse{}, virsh.MountVolume(sourcePath, targetPath, fstype, mountGroup, mountOptionsStr, readonly, allusers )
+		}
+		if err := s.nodePublishVolume_Mount(sourcePath, targetPath, readonly, fstype, mountOptions, mountGroup, allusers); err != nil {
 			return nil, err
 		}
 	default:
 		panic(fmt.Sprintf("lvm: unknown access_type: %+v", accessType))
-	}
-
-	// Set Group ID on Mount target
-	mountGroup := request.GetVolumeCapability().GetMount().GetVolumeMountGroup()
-	log.Printf("DBG Vol Mount Group = %s for %s\n", mountGroup, targetPath)
-	if mountGroup != "" {
-		if gid, err := strconv.Atoi(mountGroup); err == nil {
-			err := os.Chown(targetPath, -1, gid)
-			if err != nil {
-				fmt.Printf("WARNING MountGroup chown to %d failed. \n", gid)
-			}
-			_, err = exec.Command("chmod", "g+rwx", targetPath).CombinedOutput()
-			if err != nil {
-				log.Printf("ERROR setting g_rwx on %s \n%v\n", targetPath, err)
-			}
-		} else {
-			fmt.Printf("WARNING MountGroup %s isn't a number.\n", mountGroup)
-		}
-	}
-	fi, _ := os.Stat(targetPath)
-	log.Printf("DBG STAT OF: %s\n  %+v\n", targetPath, fi)
-
-	// Open mount to all users.  Used for debugging or pods not match user and fsuser
-	allusers, aok := pubcontext["allusers"]
-	if aok || allusers == "true" {
-		_, err := exec.Command("chmod", "ugo+rwx", targetPath).CombinedOutput()
-		if err != nil {
-			log.Printf("ERROR setting ugo_rwx on %s \n%v\n", targetPath, err)
-		}
 	}
 
 	// Set QOS
@@ -1140,7 +1158,13 @@ func (s *Server) nodePublishVolume_Block(sourcePath, targetPath string, readonly
 	return nil
 }
 
-func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly bool, fstype string, mountOptions []string) error {
+func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly bool, fstype string, mountOptions []string, mountGroup string, allusers bool ) error {
+
+	mountOptionsStr := strings.Join(mountOptions, ",")
+	if virsh.ProxyMode() {
+		return virsh.MountVolume(sourcePath, targetPath, fstype, mountGroup, mountOptionsStr, readonly, allusers )
+	}
+
 	log.Printf("Attempting to publish volume %v as MOUNT_DEVICE to %v", sourcePath, targetPath)
 	var flags uintptr
 	if readonly {
@@ -1230,7 +1254,6 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 	if fstype != existingFstype {
 		return ErrMismatchedFilesystemType
 	}
-	mountOptionsStr := strings.Join(mountOptions, ",")
 	// Try to mount the volume by assuming it is correctly formatted.
 	log.Printf("Mounting %v at %v fstype=%v, flags=%v mountOptions=%v", sourcePath, targetPath, fstype, flags, mountOptionsStr)
 	if err := syscall.Mount(sourcePath, targetPath, fstype, flags, mountOptionsStr); err != nil {
@@ -1246,6 +1269,31 @@ func (s *Server) nodePublishVolume_Mount(sourcePath, targetPath string, readonly
 			"Failed to perform mount: err=%v",
 			err)
 	}
+
+	// Set Group ID on Mount target
+	if mountGroup != "" {
+		if gid, err := strconv.Atoi(mountGroup); err == nil {
+			err := os.Chown(targetPath, -1, gid)
+			if err != nil {
+				fmt.Printf("WARNING MountGroup chown to %d failed. \n", gid)
+			}
+			_, err = exec.Command("chmod", "g+rwx", targetPath).CombinedOutput()
+			if err != nil {
+				log.Printf("ERROR setting g_rwx on %s \n%v\n", targetPath, err)
+			}
+		} else {
+			fmt.Printf("WARNING MountGroup %s isn't a number.\n", mountGroup)
+		}
+	}
+
+	// Open mount to all users.  Used for debugging or pods not match user and fsuser
+	if allusers {
+		_, err := exec.Command("chmod", "ugo+rwx", targetPath).CombinedOutput()
+		if err != nil {
+			log.Printf("ERROR setting ugo_rwx on %s \n%v\n", targetPath, err)
+		}
+	}
+
 	return nil
 }
 
@@ -1318,6 +1366,11 @@ func (s *Server) NodeUnpublishVolume(
 	// Clear QOS
 	virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
 	targetPath := request.GetTargetPath()
+
+	if virsh.ProxyMode() {
+		return response, virsh.UnMountVolume(targetPath)
+	}
+
 	mp, err := getMountAt(targetPath)
 	if err != nil {
 		return nil, status.Errorf(
@@ -1554,9 +1607,14 @@ func volumeOptsFromParameters(in map[string]string) (opts []lvm.CreateLogicalVol
 		return nil, err
 	}
 	opts = append(opts, lvm.VolumeLayoutOpt(layout))
+	// Ignore Datapath volume parameters.
+	_, ok := params["datapath"]
+	if ok {
+		delete(params, "datapath")
+	}
 
 	// Ignore QOS settings
-	_, ok := params["iopspergb"]
+	_, ok = params["iopspergb"]
 	if ok {
 		delete(params, "iopspergb")
 	}

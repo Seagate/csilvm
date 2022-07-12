@@ -32,7 +32,7 @@ import (
 )
 
 // Global variable for URL to StoLake agent
-var ProxyURL string
+var StolakeURL string
 var HostIP string // FIXME  Removing Mecury access
 
 var logger logr.Logger
@@ -101,7 +101,7 @@ const TIMEOUT = 6 * time.Second //gRPC Timeout Call limit
 
 func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
 	//CSICheck()
-	log.Printf("SOCKET %s \n", ProxyURL)
+	log.Printf("SOCKET %s \n", StolakeURL)
 	log.Printf("STOLAKEPROXY: %s %v \n", cmd, args)
 
         sc, connErr := connect()
@@ -121,15 +121,15 @@ func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
         defer sc.ClientConn.Close()
 	if err != nil {
 		log.Print(err.Error())
+		log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	}
-	log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	return []byte(res.GetStdout()), err
 }
 
-func SetProxyURL(urlstr string) bool {
+func SetStolakeURL(urlstr string) bool {
 	_, err := url.Parse(urlstr)
 	if err != nil {
-		ProxyURL = ""
+		StolakeURL = ""
 		log.Printf("FAILED StoLake URL Invalid %s \n", urlstr)
 		return false
 	}
@@ -138,19 +138,19 @@ func SetProxyURL(urlstr string) bool {
 		log.Printf("FAILED StoLake URL %s does not exist \n", urlstr)
 		return false
 	}
-	ProxyURL = urlstr
+	StolakeURL = urlstr
 	return true
 }
 
 func GetProxyURL() string {
-	return ProxyURL
+	return StolakeURL
 }
 
 func ProxyMode() bool {
-	if ProxyURL == "none" {
+	if StolakeURL == "none" {
 		return false
 	}
-	if ProxyURL == "" {
+	if StolakeURL == "" {
 		return false
 	}
 	return true
@@ -297,19 +297,74 @@ func virshProxy(args []string) ([]byte, error) {
 }
 
 func FstypeProxy(devicepath string) (string, error) {
-	url := "http://" + HostIP + ":3141/speedboat/claims/fstype?devpath=" + devicepath
-	log.Printf("GET: %s\n", url)
-	resp, err := http.Get(url)
+        sc, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        } else {
+                log.Printf("Connected to StoLake gRPC Server")
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.FileSystemTypeReq{
+		DevPath:  devicepath,
+	}
+	res, err := sc.Client.FileSystemType(ctx, req)
+        defer sc.ClientConn.Close()
 	if err != nil {
-		log.Printf("GETERROR: %s\n%v\n", url, err)
-		return "", err
+		log.Print(err.Error())
+		log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	}
-	bytes, err2 := ioutil.ReadAll(resp.Body)
-	defer resp.Body.Close()
-	if err2 != nil {
-		return "", err2
+	return string(res.GetFsType()), err
+}
+
+
+func MountVolume(source, target, fstype, guid, mountoptions string, readonly, allusers bool)  error {
+        sc, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        } else {
+                log.Printf("Connected to StoLake gRPC Server")
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.MountVolumeReq{
+		SourcePath:  source,
+		TargetPath:  target,
+		FsType:  fstype,
+		ReadOnly:  readonly,
+		MountOptions:  mountoptions,
+		GroupId:  guid,
+		AllUsers:  allusers,
 	}
-	return string(bytes), nil
+	res, err := sc.Client.MountVolume(ctx, req)
+	log.Printf("STOLAKEPROXY RESULT: %v \n", res)
+        defer sc.ClientConn.Close()
+	if err != nil {
+		log.Print(err.Error())
+	}
+	return err
+}
+
+func UnMountVolume(target string)  error {
+        sc, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.UnMountVolumeReq{
+		TargetPath:  target,
+	}
+	res, err := sc.Client.UnMountVolume(ctx, req)
+        defer sc.ClientConn.Close()
+	if err != nil {
+		log.Print(err.Error())
+		log.Printf("STOLAKEPROXY RESULT: %v \n", res)
+	}
+	return err
 }
 
 //List Virsh Pools
@@ -462,20 +517,33 @@ func ListVGs() (vgs []string) {
 }
 
 func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
-	url := "http://localhost:3141/speedboat/claims/qos?tenantname=" + vgname[5:]
-	url += "&claim=" + lvname
-	url += "&iopspergb=" + iopspergb
-	url += "&mbpspergb=" + mbpspergb
+	targetPath := "/dev/" + vgname + "/" + lvname
 
-	log.Printf("GET: %s\n", url)
-	resp, err := http.Get(url)
-	defer resp.Body.Close()
+        sc, connErr := connect()
+        if connErr != nil {
+                log.Printf("Failed to connect to Server \n%v\n",connErr)
+        } else {
+                log.Printf("Connected to StoLake gRPC Server")
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.LvQoSReq {
+		TargetPath: targetPath,
+		IOPSperGB:  iopspergb,
+		MBpSperGB:  mbpspergb,
+	}
+	res, err := sc.Client.LvQoS(ctx, req)
+        defer sc.ClientConn.Close()
 	if err != nil {
-		log.Printf("GETERROR: %s\n%v\n", url, err)
+		log.Print(err.Error())
+		log.Printf("SET QOS Failed: %v \n", res)
 	}
 	return err
 }
 
+
+// FIXME:  Add Sycn call to StoLake
 func QosSync() error {
 	url := "http://localhost:3141/speedboat/claims/qossync"
 	log.Printf("GET: %s\n", url)
@@ -544,7 +612,7 @@ func BlkID(blkdev string) (string, error) {
 
 func connect() (*Stolakeclient, error) {
         // Set up a connection to the server.
-        conn, err := grpc.Dial("unix://"+ProxyURL, grpc.WithInsecure(), grpc.WithBlock())
+        conn, err := grpc.Dial("unix://"+StolakeURL, grpc.WithInsecure(), grpc.WithBlock())
         if err != nil {
                 logger.Error(err, "Failed to connect to Server")
         }

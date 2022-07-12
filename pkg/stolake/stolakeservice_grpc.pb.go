@@ -59,6 +59,11 @@ type StolakeClient interface {
 	ListIscsi(ctx context.Context, in *ListIscsiReq, opts ...grpc.CallOption) (*ListIscsiRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(ctx context.Context, in *MercProxyReq, opts ...grpc.CallOption) (*MercProxyRes, error)
+	FileSystemType(ctx context.Context, in *FileSystemTypeReq, opts ...grpc.CallOption) (*FileSystemTypeRes, error)
+	MountInfo(ctx context.Context, in *MountInfoReq, opts ...grpc.CallOption) (*MountInfoRes, error)
+	MountVolume(ctx context.Context, in *MountVolumeReq, opts ...grpc.CallOption) (*MountVolumeRes, error)
+	UnMountVolume(ctx context.Context, in *UnMountVolumeReq, opts ...grpc.CallOption) (*UnMountVolumeRes, error)
+	LvQoS(ctx context.Context, in *LvQoSReq, opts ...grpc.CallOption) (*LvQoSRes, error)
 	// RAID Health services
 	RetrieveTopLevelLogicalVol(ctx context.Context, in *ScanReq, opts ...grpc.CallOption) (*TopLvScanRes, error)
 	RetrieveLogicalVol(ctx context.Context, in *GetLvReq, opts ...grpc.CallOption) (*GetLvRes, error)
@@ -337,6 +342,51 @@ func (c *stolakeClient) MercuryProxy(ctx context.Context, in *MercProxyReq, opts
 	return out, nil
 }
 
+func (c *stolakeClient) FileSystemType(ctx context.Context, in *FileSystemTypeReq, opts ...grpc.CallOption) (*FileSystemTypeRes, error) {
+	out := new(FileSystemTypeRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/FileSystemType", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) MountInfo(ctx context.Context, in *MountInfoReq, opts ...grpc.CallOption) (*MountInfoRes, error) {
+	out := new(MountInfoRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/MountInfo", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) MountVolume(ctx context.Context, in *MountVolumeReq, opts ...grpc.CallOption) (*MountVolumeRes, error) {
+	out := new(MountVolumeRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/MountVolume", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) UnMountVolume(ctx context.Context, in *UnMountVolumeReq, opts ...grpc.CallOption) (*UnMountVolumeRes, error) {
+	out := new(UnMountVolumeRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/UnMountVolume", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) LvQoS(ctx context.Context, in *LvQoSReq, opts ...grpc.CallOption) (*LvQoSRes, error) {
+	out := new(LvQoSRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/LvQoS", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stolakeClient) RetrieveTopLevelLogicalVol(ctx context.Context, in *ScanReq, opts ...grpc.CallOption) (*TopLvScanRes, error) {
 	out := new(TopLvScanRes)
 	err := c.cc.Invoke(ctx, "/proto.stolake/RetrieveTopLevelLogicalVol", in, out, opts...)
@@ -432,6 +482,11 @@ type StolakeServer interface {
 	ListIscsi(context.Context, *ListIscsiReq) (*ListIscsiRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(context.Context, *MercProxyReq) (*MercProxyRes, error)
+	FileSystemType(context.Context, *FileSystemTypeReq) (*FileSystemTypeRes, error)
+	MountInfo(context.Context, *MountInfoReq) (*MountInfoRes, error)
+	MountVolume(context.Context, *MountVolumeReq) (*MountVolumeRes, error)
+	UnMountVolume(context.Context, *UnMountVolumeReq) (*UnMountVolumeRes, error)
+	LvQoS(context.Context, *LvQoSReq) (*LvQoSRes, error)
 	// RAID Health services
 	RetrieveTopLevelLogicalVol(context.Context, *ScanReq) (*TopLvScanRes, error)
 	RetrieveLogicalVol(context.Context, *GetLvReq) (*GetLvRes, error)
@@ -532,6 +587,21 @@ func (UnimplementedStolakeServer) ListIscsi(context.Context, *ListIscsiReq) (*Li
 }
 func (UnimplementedStolakeServer) MercuryProxy(context.Context, *MercProxyReq) (*MercProxyRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MercuryProxy not implemented")
+}
+func (UnimplementedStolakeServer) FileSystemType(context.Context, *FileSystemTypeReq) (*FileSystemTypeRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FileSystemType not implemented")
+}
+func (UnimplementedStolakeServer) MountInfo(context.Context, *MountInfoReq) (*MountInfoRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MountInfo not implemented")
+}
+func (UnimplementedStolakeServer) MountVolume(context.Context, *MountVolumeReq) (*MountVolumeRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MountVolume not implemented")
+}
+func (UnimplementedStolakeServer) UnMountVolume(context.Context, *UnMountVolumeReq) (*UnMountVolumeRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnMountVolume not implemented")
+}
+func (UnimplementedStolakeServer) LvQoS(context.Context, *LvQoSReq) (*LvQoSRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LvQoS not implemented")
 }
 func (UnimplementedStolakeServer) RetrieveTopLevelLogicalVol(context.Context, *ScanReq) (*TopLvScanRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RetrieveTopLevelLogicalVol not implemented")
@@ -1086,6 +1156,96 @@ func _Stolake_MercuryProxy_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Stolake_FileSystemType_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FileSystemTypeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).FileSystemType(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/FileSystemType",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).FileSystemType(ctx, req.(*FileSystemTypeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_MountInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MountInfoReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).MountInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/MountInfo",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).MountInfo(ctx, req.(*MountInfoReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_MountVolume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MountVolumeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).MountVolume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/MountVolume",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).MountVolume(ctx, req.(*MountVolumeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_UnMountVolume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnMountVolumeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).UnMountVolume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/UnMountVolume",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).UnMountVolume(ctx, req.(*UnMountVolumeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_LvQoS_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LvQoSReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).LvQoS(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/LvQoS",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).LvQoS(ctx, req.(*LvQoSReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Stolake_RetrieveTopLevelLogicalVol_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ScanReq)
 	if err := dec(in); err != nil {
@@ -1316,6 +1476,26 @@ var Stolake_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MercuryProxy",
 			Handler:    _Stolake_MercuryProxy_Handler,
+		},
+		{
+			MethodName: "FileSystemType",
+			Handler:    _Stolake_FileSystemType_Handler,
+		},
+		{
+			MethodName: "MountInfo",
+			Handler:    _Stolake_MountInfo_Handler,
+		},
+		{
+			MethodName: "MountVolume",
+			Handler:    _Stolake_MountVolume_Handler,
+		},
+		{
+			MethodName: "UnMountVolume",
+			Handler:    _Stolake_UnMountVolume_Handler,
+		},
+		{
+			MethodName: "LvQoS",
+			Handler:    _Stolake_LvQoS_Handler,
 		},
 		{
 			MethodName: "RetrieveTopLevelLogicalVol",

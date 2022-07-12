@@ -2,6 +2,7 @@ package csilvm
 
 import (
 	"errors"
+	"github.com/Seagate/csiclvm/pkg/virsh"
 	"io/ioutil"
 	"strings"
 )
@@ -48,11 +49,17 @@ func (m *mountpoint) isReadonly() bool {
 }
 
 func listMounts() (mounts []mountpoint, err error) {
-	buf, err := ioutil.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return nil, err
-	}
-	return parseMountinfo(buf)
+        if !virsh.ProxyMode() {
+		buf, err := ioutil.ReadFile("/proc/self/mountinfo")
+		if err != nil {
+			return nil, err
+		}
+		return parseMountinfo(buf)
+        }
+	// FIXME
+	// Call Stolake
+	return nil, nil
+
 }
 
 func parseMountinfo(buf []byte) (mounts []mountpoint, err error) {

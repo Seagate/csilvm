@@ -73,7 +73,7 @@ func main() {
 	thishost, _ := os.Hostname()
 	nodeIDF := flag.String("node-id", thishost, "The node ID reported via the CSI Node gRPC service")
 	lockFilePathF := flag.String("lockfile", defaultLockfilePathOrEnv(), "The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances")
-	proxyurlF := flag.String("proxy", "none", "The url to the StoLake proxy agent ")
+	stolakeF := flag.String("stolake-socket", "", "The URL for the StoLake gRPC agent to be used instead of issuing local LVM commands. ")
 	// Metrics-related flags
 	statsdUDPHostEnvVarF := flag.String("statsd-udp-host-env-var", "", "The name of the environment variable containing the host where a statsd service is listening for stats over UDP")
 	statsdUDPPortEnvVarF := flag.String("statsd-udp-port-env-var", "", "The name of the environment variable containing the port where a statsd service is listening for stats over UDP")
@@ -207,9 +207,8 @@ func main() {
 			),
 		),
 	)
-	pxyurl := *proxyurlF
-	if !virsh.SetProxyURL(pxyurl) {
-		logger.Fatalf("Invalid StoLake Proxy URL. ")
+	if !virsh.SetStolakeURL(*stolakeF) {
+		logger.Fatalf("Invalid StoLake URL. ")
 	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	opts := []csilvm.ServerOpt{
@@ -229,7 +228,7 @@ func main() {
 	for _, tag := range tagsF {
 		opts = append(opts, csilvm.Tag(tag))
 	}
-	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF, *proxyurlF, opts...)
+	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF, *stolakeF, opts...)
 	if err := s.Setup(); err != nil {
 		logger.Fatalf("error initializing csilvm plugin: err=%v", err)
 	}
