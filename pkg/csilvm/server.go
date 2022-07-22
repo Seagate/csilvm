@@ -2,6 +2,7 @@ package csilvm
 
 import (
 	"bytes"
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-
+	iscsilib "github.com/Seagate/csi-lib-iscsi/iscsi"
 	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/Seagate/csiclvm/pkg/version"
 	"github.com/Seagate/csiclvm/pkg/virsh"
@@ -616,25 +617,14 @@ func deleteDataOnDevice(devicePath string) error {
 var ErrCallNotImplemented = status.Error(codes.Unimplemented, "That RPC is not implemented.")
 var ErrUnsupportDatapath = status.Error(codes.NotFound, "The datapath mode is not supported.")
 
+// Assume ControllerPublish is only called for instances running with direct attachment to drives or
+// a path to call the StoLake agent
 func (s *Server) ControllerPublishVolume(
 	ctx context.Context,
 	req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 
 	// Pass QOS from Volume Context from Vol Create in Publish Context
 	pubcontext := dupParams(req.GetVolumeContext())
-
-//	if !virsh.ProxyMode() {
-//		pubcontext["blockid"] = "notneeded"
-//		response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
-//		return response, nil
-//	}
-	// 
-	if  pubcontext["datapath"] == "direct" {
-		pubcontext["blockid"] = "notneeded"
-		response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
-		return response, nil
-	}
-
 
 	volumeID := req.GetVolumeId()
 	if volumeID == "" {
@@ -646,25 +636,48 @@ func (s *Server) ControllerPublishVolume(
 		return nil, status.Error(codes.InvalidArgument, "no node ID provided")
 	}
 
+	// VolumeCapability not needed for controller Publish but will be needed later by Node Publish
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "no volume capabilities provided")
 	}
 
-	log.Printf("ControllerPublishVolume, Looking up volume with id=%v", volumeID)
-	_, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+	lv, err := s.volumeGroup.LookupLogicalVolume(volumeID)
 	if err != nil {
+		log.Printf("ControllerPublish could not find volume with id=%v", volumeID)
 		return nil, ErrVolumeNotFound
 	}
-	log.Printf("ControllerPublishVolume, Looking up Node with id=%v", nodeID)
 
 	switch pubcontext["datapath"] {
 		case "iscsi": {
-			return nil, ErrUnsupportDatapath
+			// Pass Initiator IQN from NodeID and LV UUID to Staging Stolake 
+			lvuuid, err :=  lv.Uuid()
+			if  err != nil {
+				log.Printf("ControllerPublish could not find UUID for %v", volumeID)
+				return nil, ErrVolumeNotFound
+			}
+			// Activate the LV for targetcli to use
+			err = lv.Activate()
+			if err != nil {
+				log.Printf("Failed to Activate LV on Controller Node for iSCSI Target lvuuid %s  %v", lvuuid, err)
+				return nil, ErrVolumeNotFound
+			}
+			log.Printf("Setting Up iSCSI Target for %s to %s ", lvuuid, nodeID)
+			targetportal, err2 := virsh.StageIscsiTarget(lvuuid,nodeID)
+			if  err2 != nil {
+				log.Printf("SCSI Target Setup Error with lvuuid %s, iqn %s >> %v", lvuuid, nodeID, err2)
+				return nil, ErrVolumeNotFound
+			}
+			pubcontext["blockid"] = targetportal
+			return  &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}, nil
 		}
 		case "nvme":
 			return nil, ErrUnsupportDatapath
 		case "qemu":
 			return nil, ErrUnsupportDatapath
+		case "direct":
+			pubcontext["blockid"] = "notneeded"
+			response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
+			return response, nil
 		default:
 			return nil, ErrUnsupportDatapath
 	}
@@ -692,26 +705,41 @@ func (s *Server) ControllerPublishVolume(
 func (s *Server) ControllerUnpublishVolume(
 	ctx context.Context,
 	request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
-	
-	// FIXME: Need to discover how the volume is published to the node and undo it		
+
+	nodeid := request.GetNodeId()
+	response := &csi.ControllerUnpublishVolumeResponse{}
+	if nodeid == "" {
+		return response, status.Error(codes.InvalidArgument, "no node ID provided")
+	}
+
+	volumeID := request.GetVolumeId()
+	lv, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+	if err != nil {
+		return response, ErrVolumeNotFound
+	}
+
+	// FIXME: Need to discover how the volume is published to the node and undo it selectively 
+	//        but for now unstage and ignore errors
+	lvuuid, _ :=  lv.Uuid()
+	virsh.UnStageIscsiTarget(lvuuid,nodeid)
+	lv.Deactivate()
+
 	return  &csi.ControllerUnpublishVolumeResponse{}, nil
 
+	//FIXME  DEAD code
 	if !virsh.ProxyMode() {
 		response := &csi.ControllerUnpublishVolumeResponse{}
 		return response, nil
 	}
 
-
 	//Validate Domain Name
-	nodeid := request.GetNodeId()
 	if nodeid == "" {
 		return nil, status.Error(codes.InvalidArgument, "no node ID provided")
 	}
 	if !virsh.IsDomValid(nodeid) {
 		return nil, status.Error(codes.NotFound, "Unknown nodeid "+nodeid+" doesn't map to oVirt DOM.")
 	}
-	volumeID := request.GetVolumeId()
-	_, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+	_, err = s.volumeGroup.LookupLogicalVolume(volumeID)
 	if err != nil {
 		return nil, ErrVolumeNotFound
 	}
@@ -720,7 +748,6 @@ func (s *Server) ControllerUnpublishVolume(
 		msg := fmt.Sprintf("Failed to UnPublish for %s\n %v\n", volumeID, err)
 		return nil, status.Error(codes.Internal, msg)
 	}
-	response := &csi.ControllerUnpublishVolumeResponse{}
 	return response, nil
 }
 
@@ -1034,9 +1061,39 @@ func (s *Server) NodePublishVolume(
 				"Failed to activate volume: err=%v",
 				err)
 		}
-	} else {
-		//FIXME: Add support for nondirect datapaths
-		sourcePath = "/dev/" + pubcontext["blockid"]
+	}
+	if pubcontext["datapath"] == "iscsi" {
+		// Setup iscsi initiator
+		targetiqn := pubcontext["iqn"]
+		portal := pubcontext["portal"]
+		lun, _ := strconv.Atoi(pubcontext["lun"])
+
+		// test and produce a warning if path already exists before iscsi login
+		devicePath := fmt.Sprintf("/dev/disk/by-path/ip-%s:3260-iscsi-%s-lun-%d", portal, targetiqn, lun)
+		_, err := os.Stat(devicePath)
+		if !os.IsNotExist(err) {
+			_, err := os.Stat(devicePath)
+			log.Printf("WARNING: device exists (%v) before iscsi login, os.Stat err=%v", devicePath, err)
+		}
+		targets := make([]iscsilib.TargetInfo, 0)
+		targets = append(targets, iscsilib.TargetInfo{
+			Iqn:    targetiqn,
+			Portal: portal,
+		})
+		connector := iscsilib.Connector{
+			Targets:     targets,
+			Lun:         int32(lun),
+			DoDiscovery: true,
+			RetryCount:  10,
+		}
+
+
+		iscsiDevPath, err := iscsilib.Connect(&connector)
+		if err != nil {
+			log.Printf("ERROR ISCSI Initiator Setup Error %+v %v \n", targets, err)
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
+		sourcePath = iscsiDevPath
 	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
@@ -1418,6 +1475,17 @@ func (s *Server) NodeGetInfo(
 	topology := &csi.Topology{
 		Segments: map[string]string{tenant + topologyKey: s.nodeID},
 	}
+
+	// Valid iscsi IQN overrides nodeID
+	initiatorName, err := readInitiatorName()
+	if err == nil {
+		return &csi.NodeGetInfoResponse{
+			NodeId:             initiatorName,
+			AccessibleTopology: topology,
+		}, nil
+
+	}
+
 	return &csi.NodeGetInfoResponse{
 		NodeId:             s.nodeID,
 		AccessibleTopology: topology,
@@ -1598,6 +1666,8 @@ func dupParams(in map[string]string) map[string]string {
 	return params
 }
 
+
+
 // volumeOptsFromParameters parses volume create parameters into
 // lvm.CreateLogicalVolumeOpt funcs.  If returns an error if there are
 // unconsumed parameters or if validation fails.
@@ -1673,3 +1743,31 @@ func RequestLimitInterceptor(requestLimit int) grpc.UnaryServerInterceptor {
 		return handler(ctx, req)
 	}
 }
+
+
+// readInitiatorName: Extract the initiator name from /etc/iscsi file
+func readInitiatorName() (string, error) {
+	initiatorNameFilePath := "/etc/iscsi/initiatorname.iscsi"
+	file, err := os.Open(initiatorNameFilePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if equal := strings.Index(line, "="); equal >= 0 {
+			if strings.TrimSpace(line[:equal]) == "InitiatorName" {
+				return strings.TrimSpace(line[equal+1:]), nil
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return "", fmt.Errorf("InitiatorName key is missing from %s", initiatorNameFilePath)
+}
+

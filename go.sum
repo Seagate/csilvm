@@ -5,6 +5,8 @@ github.com/DataDog/datadog-go v2.2.0+incompatible h1:V5BKkxACZLjzHjSgBbr2gvLA2Ae
 github.com/DataDog/datadog-go v2.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/DataDog/datadog-go v4.8.3+incompatible h1:fNGaYSuObuQb5nzeTQqowRAd9bpDIRRV4/gUtIBjh8Q=
 github.com/DataDog/datadog-go v4.8.3+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
+github.com/Seagate/csi-lib-iscsi v1.0.3 h1:PEPCySqKmdRwgyM4vb/cugFVyNbo5JL+f/J7W4Q/WVw=
+github.com/Seagate/csi-lib-iscsi v1.0.3/go.mod h1:sp7ftl8BMVgMNybv3sw8V20MJsX0bl2w5BoSFlBRPkY=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/cactus/go-statsd-client v3.1.1+incompatible h1:p97okCU2aaeSxQ6KzMdGEwQkiGBMys71/J0XWoirbJY=
 github.com/cactus/go-statsd-client v3.1.1+incompatible/go.mod h1:cMRcwZDklk7hXp+Law83urTHUiHMzCev/r4JMYr/zU0=

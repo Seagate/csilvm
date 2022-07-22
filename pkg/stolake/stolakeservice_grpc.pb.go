@@ -55,7 +55,7 @@ type StolakeClient interface {
 	ConfigureBand(ctx context.Context, in *ConfigBandReq, opts ...grpc.CallOption) (*Res, error)
 	// iSCSI Services
 	StageIscsi(ctx context.Context, in *StageIscsiReq, opts ...grpc.CallOption) (*StageIscsiRes, error)
-	UnStageIscsi(ctx context.Context, in *StageIscsiReq, opts ...grpc.CallOption) (*UnStageIscsiRes, error)
+	UnStageIscsi(ctx context.Context, in *UnStageIscsiReq, opts ...grpc.CallOption) (*UnStageIscsiRes, error)
 	ListIscsi(ctx context.Context, in *ListIscsiReq, opts ...grpc.CallOption) (*ListIscsiRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(ctx context.Context, in *MercProxyReq, opts ...grpc.CallOption) (*MercProxyRes, error)
@@ -315,7 +315,7 @@ func (c *stolakeClient) StageIscsi(ctx context.Context, in *StageIscsiReq, opts 
 	return out, nil
 }
 
-func (c *stolakeClient) UnStageIscsi(ctx context.Context, in *StageIscsiReq, opts ...grpc.CallOption) (*UnStageIscsiRes, error) {
+func (c *stolakeClient) UnStageIscsi(ctx context.Context, in *UnStageIscsiReq, opts ...grpc.CallOption) (*UnStageIscsiRes, error) {
 	out := new(UnStageIscsiRes)
 	err := c.cc.Invoke(ctx, "/proto.stolake/UnStageIscsi", in, out, opts...)
 	if err != nil {
@@ -478,7 +478,7 @@ type StolakeServer interface {
 	ConfigureBand(context.Context, *ConfigBandReq) (*Res, error)
 	// iSCSI Services
 	StageIscsi(context.Context, *StageIscsiReq) (*StageIscsiRes, error)
-	UnStageIscsi(context.Context, *StageIscsiReq) (*UnStageIscsiRes, error)
+	UnStageIscsi(context.Context, *UnStageIscsiReq) (*UnStageIscsiRes, error)
 	ListIscsi(context.Context, *ListIscsiReq) (*ListIscsiRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(context.Context, *MercProxyReq) (*MercProxyRes, error)
@@ -579,7 +579,7 @@ func (UnimplementedStolakeServer) ConfigureBand(context.Context, *ConfigBandReq)
 func (UnimplementedStolakeServer) StageIscsi(context.Context, *StageIscsiReq) (*StageIscsiRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StageIscsi not implemented")
 }
-func (UnimplementedStolakeServer) UnStageIscsi(context.Context, *StageIscsiReq) (*UnStageIscsiRes, error) {
+func (UnimplementedStolakeServer) UnStageIscsi(context.Context, *UnStageIscsiReq) (*UnStageIscsiRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UnStageIscsi not implemented")
 }
 func (UnimplementedStolakeServer) ListIscsi(context.Context, *ListIscsiReq) (*ListIscsiRes, error) {
@@ -1103,7 +1103,7 @@ func _Stolake_StageIscsi_Handler(srv interface{}, ctx context.Context, dec func(
 }
 
 func _Stolake_UnStageIscsi_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StageIscsiReq)
+	in := new(UnStageIscsiReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -1115,7 +1115,7 @@ func _Stolake_UnStageIscsi_Handler(srv interface{}, ctx context.Context, dec fun
 		FullMethod: "/proto.stolake/UnStageIscsi",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StolakeServer).UnStageIscsi(ctx, req.(*StageIscsiReq))
+		return srv.(StolakeServer).UnStageIscsi(ctx, req.(*UnStageIscsiReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }

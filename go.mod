@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/DataDog/datadog-go v2.2.0+incompatible
+	github.com/Seagate/csi-lib-iscsi v1.0.3
 	github.com/cactus/go-statsd-client v3.1.1+incompatible
 	github.com/container-storage-interface/spec v1.6.0
 	github.com/go-logr/logr v1.2.3

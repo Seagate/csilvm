@@ -44,7 +44,7 @@ service stolake {
 
     // iSCSI Services
     rpc StageIscsi(StageIscsiReq) returns (StageIscsiRes);
-    rpc UnStageIscsi(StageIscsiReq) returns (UnStageIscsiRes);
+    rpc UnStageIscsi(UnStageIscsiReq) returns (UnStageIscsiRes);
     rpc ListIscsi(ListIscsiReq) returns (ListIscsiRes);
 
     // Mercury Services for CSI driver

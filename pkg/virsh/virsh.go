@@ -106,9 +106,7 @@ func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
 
         sc, connErr := connect()
         if connErr != nil {
-                log.Printf("Failed to connect to Server \n%v\n",connErr)
-        } else {
-                log.Printf("Connected to StoLake gRPC Server")
+		return nil , connErr
         }
 
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
@@ -299,9 +297,7 @@ func virshProxy(args []string) ([]byte, error) {
 func FstypeProxy(devicepath string) (string, error) {
         sc, connErr := connect()
         if connErr != nil {
-                log.Printf("Failed to connect to Server \n%v\n",connErr)
-        } else {
-                log.Printf("Connected to StoLake gRPC Server")
+		return "" , connErr
         }
 
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
@@ -322,9 +318,7 @@ func FstypeProxy(devicepath string) (string, error) {
 func MountVolume(source, target, fstype, guid, mountoptions string, readonly, allusers bool)  error {
         sc, connErr := connect()
         if connErr != nil {
-                log.Printf("Failed to connect to Server \n%v\n",connErr)
-        } else {
-                log.Printf("Connected to StoLake gRPC Server")
+		return connErr
         }
 
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
@@ -351,6 +345,7 @@ func UnMountVolume(target string)  error {
         sc, connErr := connect()
         if connErr != nil {
                 log.Printf("Failed to connect to Server \n%v\n",connErr)
+		return connErr
         }
 
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
@@ -521,9 +516,7 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 
         sc, connErr := connect()
         if connErr != nil {
-                log.Printf("Failed to connect to Server \n%v\n",connErr)
-        } else {
-                log.Printf("Connected to StoLake gRPC Server")
+		return connErr
         }
 
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
@@ -539,6 +532,38 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 		log.Print(err.Error())
 		log.Printf("SET QOS Failed: %v \n", res)
 	}
+	return err
+}
+
+func StageIscsiTarget(lvuuid, initiqn string) (targetportal string, err error) {
+        sc, connErr := connect()
+        if connErr != nil {
+		return "" , connErr
+        }
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.StageIscsiReq {
+		LvUuid: lvuuid,
+		InitiatorIqn:  initiqn,
+	}
+	res, err := sc.Client.StageIscsi(ctx, req)
+        defer sc.ClientConn.Close()
+	return string(res.GetTargetPortal()), err
+}
+
+func UnStageIscsiTarget(lvuuid, initiqn string) error {
+        sc, connErr := connect()
+        if connErr != nil {
+		return connErr
+        }
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.UnStageIscsiReq {
+		LvUuid: lvuuid,
+		InitiatorIqn:  initiqn,
+	}
+	_, err := sc.Client.UnStageIscsi(ctx, req)
+        defer sc.ClientConn.Close()
 	return err
 }
 
@@ -615,6 +640,9 @@ func connect() (*Stolakeclient, error) {
         conn, err := grpc.Dial("unix://"+StolakeURL, grpc.WithInsecure(), grpc.WithBlock())
         if err != nil {
                 logger.Error(err, "Failed to connect to Server")
+                log.Printf("Failed to connect to Server \n%v\n",err)
+        } else {
+                log.Printf("Connection to gRPC Server Established !!")
         }
         c := pb.NewStolakeClient(conn)
 
@@ -638,8 +666,6 @@ func CSICheck() {
         cli, connErr := connect()
         if connErr != nil {
                 log.Printf("Failed to connect to Server \n%v\n",connErr)
-        } else {
-                log.Printf("Connection to gRPC Server Established !!")
         }
 
 

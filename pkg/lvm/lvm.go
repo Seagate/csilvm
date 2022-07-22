@@ -438,6 +438,7 @@ type lvsItem struct {
 	LvPath string `json:"lv_path"`
 	LvSize uint64 `json:"lv_size,string"`
 	LvTags string `json:"lv_tags"`
+	LvUuid string `json:"lv_uuid"`
 }
 
 func (lv lvsItem) tagList() (tags []string) {
@@ -704,6 +705,26 @@ func (lv *LogicalVolume) Tags() ([]string, error) {
 	}
 	return nil, ErrLogicalVolumeNotFound
 }
+
+// Return the UUID of the LV .
+func (lv *LogicalVolume) Uuid() (string, error) {
+	result := new(lvsOutput)
+	if err := run("lvs", result, "--options=lv_uuid", lv.vg.name+"/"+lv.name); err != nil {
+		if IsLogicalVolumeNotFound(err) {
+			return "", ErrLogicalVolumeNotFound
+		}
+		return "", err
+	}
+	for _, report := range result.Report {
+		for _, lv := range report.Lv {
+
+			return lv.LvUuid, nil
+		}
+	}
+	return "", ErrLogicalVolumeNotFound
+}
+
+
 
 func (lv *LogicalVolume) Remove() error {
 	if err := run("lvremove", nil, "-f", lv.vg.name+"/"+lv.name); err != nil {
