@@ -535,10 +535,10 @@ func SetQos(vgname, lvname, iopspergb, mbpspergb string) error {
 	return err
 }
 
-func StageIscsiTarget(lvuuid, initiqn string) (targetportal string, err error) {
+func StageIscsiTarget(lvuuid, initiqn string) (targetiqn, lun, portal string, err error) {
         sc, connErr := connect()
         if connErr != nil {
-		return "" , connErr
+		return "", "", "", connErr
         }
         ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
         defer cancel()
@@ -548,7 +548,23 @@ func StageIscsiTarget(lvuuid, initiqn string) (targetportal string, err error) {
 	}
 	res, err := sc.Client.StageIscsi(ctx, req)
         defer sc.ClientConn.Close()
-	return string(res.GetTargetPortal()), err
+	targetiqn = string(res.GetTargetIqn())
+	lun = string(res.GetLun())
+	// Remove 'lun' text if present
+	lun = strings.Replace(lun, "lun", "", -1)
+
+	portal = string(res.GetTargetPortal())
+	// If Portal = 0.0.0.0 (listening on all) use node IP passed 
+	// as an environment variable by pod spec
+	if portal[0:7] == "0.0.0.0" {
+		if os.Getenv("CSI_NODE_IP") != "" {
+			portal = os.Getenv("CSI_NODE_IP") + portal[7:len(portal)]
+		} else {
+			log.Printf("WARNING: CSI_NODE_IP environment variable not set for Portal IP subsitution")
+		}
+	}
+
+	return targetiqn, lun, portal, err
 }
 
 func UnStageIscsiTarget(lvuuid, initiqn string) error {
@@ -567,6 +583,22 @@ func UnStageIscsiTarget(lvuuid, initiqn string) error {
 	return err
 }
 
+
+func LoginIscsiTarget(targetiqn, portal string)  error {
+	var args []string
+	args = append(args, "-m", "node", "--login")
+	args = append(args, "--target", targetiqn)
+	args = append(args, "--poartal", portal)
+	res, err := virsh.ProxyStoLakeRun("iscsiadm", args...)
+	if err != nil {
+		return  fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
+	}
+	if res != "" {
+		return  fmt.Errorf("ISCSADM FAILED: %v : %v", args, err)
+	}
+	return  nil
+
+}
 
 // FIXME:  Add Sycn call to StoLake
 func QosSync() error {

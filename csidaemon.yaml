@@ -35,7 +35,7 @@ spec:
         - name: CSI_NODE_IP
           valueFrom:
             fieldRef:
-              fieldPath: status.podIP
+              fieldPath: status.hostIP
         volumeMounts:
             # Stolake socket running outside K8s on base OS
           - mountPath: /var/run/stolake

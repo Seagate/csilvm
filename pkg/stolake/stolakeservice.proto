@@ -47,6 +47,11 @@ service stolake {
     rpc UnStageIscsi(UnStageIscsiReq) returns (UnStageIscsiRes);
     rpc ListIscsi(ListIscsiReq) returns (ListIscsiRes);
 
+    // NVMeoF Services
+    rpc StageNvmef(StageNvmefReq) returns (StageNvmefRes);
+    rpc UnStageNvmef(UnStageNvmefReq) returns (UnStageNvmefRes);
+    rpc ListNvmef(ListNvmefReq) returns (ListNvmefRes);
+
     // Mercury Services for CSI driver
     rpc MercuryProxy(MercProxyReq) returns (MercProxyRes);
     rpc FileSystemType(FileSystemTypeReq) returns (FileSystemTypeRes);
@@ -330,35 +335,241 @@ message ConfigBandReq {
 
 // ISCSI //
 message StageIscsiReq {
-    // Logical Volume UUID to be used as backing storage of the iSCSI target
+    // The Universal Unique Identifier (UUID) of the Logical Volume(LV)
+    // to be used as backing storage of the iSCSI target. It should only
+    // contain alphanumeric characters with length 6-4-4-4-4-4-6,
+    // separated by hyphen. The LV with the UUID should exist and be 
+    // accessible on the system. This field is REQUIRED. 
+    // (i.e. 07HpVE-DIAN-wO00-eG7J-j3qf-xz2S-zyAdJT)
     string LvUuid = 1;
-    // Initiators IQN for access control to target
+    
+    // The iSCSI Qualified Name(IQN) of the iSCSI initiator to be added
+    // to the access control list of the iSCSI target, for access control
+    // to the target. Run the command 'cat /etc/iscsi/initiatorname.iscsi'
+    // on the initiator system to get the IQN. This field is REQUIRED.
     string InitiatorIqn = 2;
 }
 
 message StageIscsiRes {
-    // The iscsi target portal (IP and port).  Example: 10.1.0.123:3260
-    string TargetPortal = 1;
+    // The iSCSI Qualified Name (IQN) of the iSCSI Target used to uniquely
+    // identify the target. It has a fixed prefix and follows the syntax
+    // 'iqn.1992-09.com.seagate:lv:uniquename', where the unique name in
+    // this case is the UUID of the logical volume used as the backing 
+    // storage.
+    string TargetIqn = 1;
+    
+    // The mapped LUN of the iSCSI target. Since there is only one
+    // backstore that can be used, which is the backstore with the LV UUID
+    // as its name, there will only be one mapped LUN to the target. The
+    // default value is 'lun0'.
+    string Lun = 2;
+
+    // The iSCSI target portal (Network address:port number) created by
+    // targetcli when the iSCSI target is created (i.e. 10.1.0.123:3260).
+    // The default port used for iSCSI is 3260. The default portal value
+    // is '0.0.0.0:3260'. Currently, there is no attempt to change it
+    // within the code.
+    string TargetPortal = 3;
 }
 
 message UnStageIscsiReq {
-    // Logical Volume UUID being used as backing storage of the iSCSI target
+    // The UUID of the Logical Volume being used as backing storage of the
+    // iSCSI target. It should only contain alphanumeric characters with
+    // length 6-4-4-4-4-4-6, separated by hyphen. When the last initiator
+    // IQN has been removed from the access control list of the target
+    // with the UUID, the target will be deleted. This field is REQUIRED.
+    // (i.e. 07HpVE-DIAN-wO00-eG7J-j3qf-xz2S-zyAdJT)
     string LvUuid = 1;
-    // Initiators IQN that will be removed from access control list of the target
+
+    // The iSCSI Qualified Name(IQN) of the iSCSI initiator to be removed
+    // from the access control list of the iSCSI target. When the last
+    // initiator IQN has been removed from the access control list of the
+    // iSCSI target, the iSCSI target will be deleted. The backstore with
+    // the LV UUID as its name will also be removed from the iSCSI
+    // configuration. This field is REQUIRED.
     string InitiatorIqn = 2;
 }
 
-message UnStageIscsiRes {}
+message UnStageIscsiRes {
+    //Intentionally empty.
+}
 
-message ListIscsiReq {}
+message ListIscsiReq {
+    //Intentionally empty.
+}
 
 message ListIscsiRes {
     message Target {
-        string Lvuuid = 1;
-        string Portal = 2;
-        string Lun = 3;
-        string InitiatorIqn = 4;
+        // The iSCSI Qualified Name (IQN) of the iSCSI Target used to uniquely
+        // identify the target.
+        string TargetIqn = 1;
+
+        // The UUID of the Logical Volume being used as backing storage of
+        // the iSCSI target.
+        string LvUuid = 2;
+
+        // Returns the default portal value that is created for every 
+        // iSCSI target. (i.e 0.0.0.0:3260)
+        string Portal = 3;
+
+        // Returns the mapped LUN of the iSCSI target. Since there is only
+        // 1 backstore that can be used, which is the backstore with the
+        // LV UUID as its name, there will only be 1 mapped LUN to the
+        // target. The default value 'lun0' will be returned.
+        string Lun = 4;
+
+        // The iSCSI Qualified Name(IQN) of the iSCSI initiator in the
+        // access control list of the iSCSI target. If there are multiple
+        // initiator IQNs, they will be included in separate structs,
+        // whereby the LV UUID and Initiator IQN pair will be unique for
+        // each struct.
+        string InitiatorIqn = 5;
     }
 
+    // Returns a list of Target structs, containing the 4 values of the
+    // parameters in Target.
+    repeated Target Targets = 1;
+}
+
+// NVMEoF //
+message StageNvmefReq {
+    // The UUID of the Logical Volume(LV) to be used as backing storage
+    // of the NVMeoF target Subsystem. It should only contain alphanumeric
+    // characters with length 6-4-4-4-4-4-6, separated by hyphen. The
+    // LV with the UUID should exist and be accessible on the system.
+    // The LV path will be used as the device path of the NVMe subsystem.
+    // This field is REQUIRED. 
+    // (i.e. 07HpVE-DIAN-wO00-eG7J-j3qf-xz2S-zyAdJT)
+    string LvUuid = 1;
+
+    // The NVMe Qualified Name (NQN) of the host that is to be added to
+    // the allowed hosts of the NVMe Subsystem. The NQN will first be read
+    // from '/etc/nvme/hostnqn' on the host system. If that does not exist
+    // , the autogenerated NQN value from the NVMe Host kernel module on 
+    // the host system is used next. Use the command 'nvme gen-hostnqn'
+    // from the nvme-cli package to generate a hostnqn file in the 
+    // '/etc/nvme' directory. This field is REQUIRED.
+    string HostNqn = 2;
+    
+    // The address family parameter of the NVMe port. This parameter only
+    // allow the value 'ipv4' and 'ipv6'. It is case sensitive and 'ipv4'
+    // is more commonly used. Using 'ipv6' might result in an error if it
+    // is not supported. This field is OPTIONAL. The value will default to
+    // 'ipv4' if left empty.
+    string AdrFam = 3;
+
+    // The transport type parameter of the NVMe port. This parameter 
+    // currently only allow the value 'rdma' or 'tcp'. Modprobe of the
+    // necessary modules is required to use the stated transport type,
+    // 'nvmet-rdma' or 'nvmet-tcp' for the 'rdma' or 'tcp' transport type
+    // respectively. This field is OPTIONAL. The value will default to
+    // 'rdma' if left empty.
+    string TrType = 4;
+
+    // This parameter is to specify the network address of the NVMe port.
+    // If using IP-based address, the address family should be 'ipv4' and
+    // the transport type should also use IP-addressing. The default port
+    // number used will be 4420. This field is REQUIRED.
+    string TrAddr = 5;
+}
+
+message StageNvmefRes {
+    // The NVMe Qualified Name (NQN) of the NVMeoF target Subsystem
+    // used to uniquely identify the subsystem. It has a fixed prefix and  
+    // follows the syntax 'nqn.1992-09.com.seagate:nvme:uniquename', where
+    // the unique name in this case is the UUID of the logical volume used
+    // as the backing storage.
+    string SubsystemNqn = 1;
+
+    // The namespace of the subsystem where the backing storage is
+    // configured. The backing storage is the logical volume with the UUID
+    // specified in the NQN of the subsystem. The device path of the 
+    // namespace is set to the path of the logical volume. The namespace
+    // is typically specified in the NVMe device name after the 'n'.
+    // (e.g. nvme0n1, namespace is 1 in this case)
+    string Namespace = 2;
+    
+    // The target portal value is the combination of the network address
+    // and default NVMe port number of the NVMe port.
+    string TargetPortal = 3;
+}
+
+message UnStageNvmefReq {
+    // The UUID of the Logical Volume being used as backing storage of the
+    // NVMeoF target subsystem. It should only contain alphanumeric 
+    // characters with length 6-4-4-4-4-4-6, separated by hyphen.
+    // (i.e. 07HpVE-DIAN-wO00-eG7J-j3qf-xz2S-zyAdJT) 
+    // When the last host NQN has been removed from the access control 
+    // list of the subsystem with the UUID, the namespace of the subsystem
+    // will be removed and the subsystem will be deleted. The subsystem's
+    // link to any port will be removed. If the port has the last 
+    // symlinked target removed, the port will also be deleted.
+    // This field is REQUIRED. 
+    string LvUuid = 1;
+
+    // The NVMe Qualified Name (NQN) of the host that is to be removed
+    // from the allowed hosts list of the NVMe target subsystem. When the
+    // last host NQN has been removed from the allowed hosts list of the
+    // NVMe subsystem, the namespace of the target will be removed and the
+    // NVMe subsystem will be deleted. The symlink of the subsystem will
+    // also be removed from any ports where it exists. This field is
+    // REQUIRED.
+    string HostNqn = 2;
+}
+
+message UnStageNvmefRes {
+    //Intentionally empty.
+}
+
+message ListNvmefReq {
+    //Intentionally empty.
+}
+
+message ListNvmefRes {
+    message Target {
+        // The NVMe Qualified Name (NQN) of the NVMeoF target Subsystem 
+        // used to uniquely identify the subsystem. It has a fixed prefix and  
+        // follows the syntax 'nqn.1992-09.com.seagate:nvme:uniquename', where
+        // the unique name in this case is the UUID of the logical volume used
+        // as the backing storage.
+        string SubsystemNqn = 1;
+
+        // The UUID of the Logical Volume being used as backing storage of
+        // the NVMe subsystem. Add the fixed prefix before the UUID to get
+        // the NQN of the subsystem. The NQN can be used in the '-n' 
+        // option of the 'nvme connect' command on the host system to 
+        // connect to the NVMe subsystem.
+        string LvUuid = 2;
+
+        // The namespace of the subsystem where the backing storage is the
+        // logical volume with the LvUuid parameter as its UUID. The LV
+        // path is set in the device path of the namespace. The namespace
+        // is typically specified in the NVMe device name after the 'n'.
+        // (e.g. nvme0n1, namespace is 1 in this case)
+        string NameSpace = 3;
+
+        // The configured transport type of the NVMe port. Values are
+        // 'rdma', 'tcp' or other supported transport types. Value can be
+        // used in the '-t' option for the command 'nvme discover' on the
+        // host system.
+        string TrType = 4;
+
+        // The combination of the network address and default NVMe port
+        // number of the NVMe port. (i.e 10.1.0.123:4420) The network
+        // address portion can be used in the '-a' option for the command
+        // 'nvme discover' on the host system.
+        string Portal = 5;
+
+        // The NVMe Qualified Name (NQN) of the hosts allowed to connect
+        // to the NVMe target. If there are multiple NQNs, each host NQN
+        // will be returned in a separate struct, whereby the LV UUID and
+        // host NQN pair will be unique for each struct. Use the 'nvme
+        // discover' and 'nvme connect' command on the host system in the
+        // allowed hosts list to connect to the NVMe subsytem.
+        string HostNqn = 6;
+    }
+
+    // Returns a list of Target structs, containing the 4 values of the
+    // parameters in Target.
     repeated Target Targets = 1;
 }

@@ -57,6 +57,10 @@ type StolakeClient interface {
 	StageIscsi(ctx context.Context, in *StageIscsiReq, opts ...grpc.CallOption) (*StageIscsiRes, error)
 	UnStageIscsi(ctx context.Context, in *UnStageIscsiReq, opts ...grpc.CallOption) (*UnStageIscsiRes, error)
 	ListIscsi(ctx context.Context, in *ListIscsiReq, opts ...grpc.CallOption) (*ListIscsiRes, error)
+	// NVMeoF Services
+	StageNvmef(ctx context.Context, in *StageNvmefReq, opts ...grpc.CallOption) (*StageNvmefRes, error)
+	UnStageNvmef(ctx context.Context, in *UnStageNvmefReq, opts ...grpc.CallOption) (*UnStageNvmefRes, error)
+	ListNvmef(ctx context.Context, in *ListNvmefReq, opts ...grpc.CallOption) (*ListNvmefRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(ctx context.Context, in *MercProxyReq, opts ...grpc.CallOption) (*MercProxyRes, error)
 	FileSystemType(ctx context.Context, in *FileSystemTypeReq, opts ...grpc.CallOption) (*FileSystemTypeRes, error)
@@ -333,6 +337,33 @@ func (c *stolakeClient) ListIscsi(ctx context.Context, in *ListIscsiReq, opts ..
 	return out, nil
 }
 
+func (c *stolakeClient) StageNvmef(ctx context.Context, in *StageNvmefReq, opts ...grpc.CallOption) (*StageNvmefRes, error) {
+	out := new(StageNvmefRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/StageNvmef", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) UnStageNvmef(ctx context.Context, in *UnStageNvmefReq, opts ...grpc.CallOption) (*UnStageNvmefRes, error) {
+	out := new(UnStageNvmefRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/UnStageNvmef", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) ListNvmef(ctx context.Context, in *ListNvmefReq, opts ...grpc.CallOption) (*ListNvmefRes, error) {
+	out := new(ListNvmefRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/ListNvmef", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stolakeClient) MercuryProxy(ctx context.Context, in *MercProxyReq, opts ...grpc.CallOption) (*MercProxyRes, error) {
 	out := new(MercProxyRes)
 	err := c.cc.Invoke(ctx, "/proto.stolake/MercuryProxy", in, out, opts...)
@@ -480,6 +511,10 @@ type StolakeServer interface {
 	StageIscsi(context.Context, *StageIscsiReq) (*StageIscsiRes, error)
 	UnStageIscsi(context.Context, *UnStageIscsiReq) (*UnStageIscsiRes, error)
 	ListIscsi(context.Context, *ListIscsiReq) (*ListIscsiRes, error)
+	// NVMeoF Services
+	StageNvmef(context.Context, *StageNvmefReq) (*StageNvmefRes, error)
+	UnStageNvmef(context.Context, *UnStageNvmefReq) (*UnStageNvmefRes, error)
+	ListNvmef(context.Context, *ListNvmefReq) (*ListNvmefRes, error)
 	// Mercury Services for CSI driver
 	MercuryProxy(context.Context, *MercProxyReq) (*MercProxyRes, error)
 	FileSystemType(context.Context, *FileSystemTypeReq) (*FileSystemTypeRes, error)
@@ -584,6 +619,15 @@ func (UnimplementedStolakeServer) UnStageIscsi(context.Context, *UnStageIscsiReq
 }
 func (UnimplementedStolakeServer) ListIscsi(context.Context, *ListIscsiReq) (*ListIscsiRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListIscsi not implemented")
+}
+func (UnimplementedStolakeServer) StageNvmef(context.Context, *StageNvmefReq) (*StageNvmefRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StageNvmef not implemented")
+}
+func (UnimplementedStolakeServer) UnStageNvmef(context.Context, *UnStageNvmefReq) (*UnStageNvmefRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnStageNvmef not implemented")
+}
+func (UnimplementedStolakeServer) ListNvmef(context.Context, *ListNvmefReq) (*ListNvmefRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListNvmef not implemented")
 }
 func (UnimplementedStolakeServer) MercuryProxy(context.Context, *MercProxyReq) (*MercProxyRes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MercuryProxy not implemented")
@@ -1138,6 +1182,60 @@ func _Stolake_ListIscsi_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Stolake_StageNvmef_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StageNvmefReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).StageNvmef(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/StageNvmef",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).StageNvmef(ctx, req.(*StageNvmefReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_UnStageNvmef_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnStageNvmefReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).UnStageNvmef(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/UnStageNvmef",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).UnStageNvmef(ctx, req.(*UnStageNvmefReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_ListNvmef_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNvmefReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).ListNvmef(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/ListNvmef",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).ListNvmef(ctx, req.(*ListNvmefReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Stolake_MercuryProxy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MercProxyReq)
 	if err := dec(in); err != nil {
@@ -1472,6 +1570,18 @@ var Stolake_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListIscsi",
 			Handler:    _Stolake_ListIscsi_Handler,
+		},
+		{
+			MethodName: "StageNvmef",
+			Handler:    _Stolake_StageNvmef_Handler,
+		},
+		{
+			MethodName: "UnStageNvmef",
+			Handler:    _Stolake_UnStageNvmef_Handler,
+		},
+		{
+			MethodName: "ListNvmef",
+			Handler:    _Stolake_ListNvmef_Handler,
 		},
 		{
 			MethodName: "MercuryProxy",

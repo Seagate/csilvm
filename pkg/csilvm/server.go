@@ -662,12 +662,14 @@ func (s *Server) ControllerPublishVolume(
 				return nil, ErrVolumeNotFound
 			}
 			log.Printf("Setting Up iSCSI Target for %s to %s ", lvuuid, nodeID)
-			targetportal, err2 := virsh.StageIscsiTarget(lvuuid,nodeID)
+			targetiqn, lun, targetportal, err2 := virsh.StageIscsiTarget(lvuuid,nodeID)
 			if  err2 != nil {
 				log.Printf("SCSI Target Setup Error with lvuuid %s, iqn %s >> %v", lvuuid, nodeID, err2)
 				return nil, ErrVolumeNotFound
 			}
-			pubcontext["blockid"] = targetportal
+			pubcontext["blockid"] = targetiqn
+			pubcontext["lun"] = lun
+			pubcontext["portal"] = targetportal
 			return  &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}, nil
 		}
 		case "nvme":
@@ -1041,6 +1043,9 @@ func (s *Server) NodePublishVolume(
 	id := request.GetVolumeId()
 	pubcontext := request.GetPublishContext()
 	sourcePath := ""
+	if _, ok := pubcontext["datapath"]; !ok {
+		return nil, status.Errorf(codes.Internal,"Missing 'datapath' in PubContxt: %v", pubcontext)
+	}
 	if pubcontext["datapath"] == "direct" {
 		log.Printf("Looking up volume with id=%v", id)
 		lv, err := s.volumeGroup.LookupLogicalVolume(id)
@@ -1063,37 +1068,29 @@ func (s *Server) NodePublishVolume(
 		}
 	}
 	if pubcontext["datapath"] == "iscsi" {
-		// Setup iscsi initiator
-		targetiqn := pubcontext["iqn"]
-		portal := pubcontext["portal"]
-		lun, _ := strconv.Atoi(pubcontext["lun"])
-
-		// test and produce a warning if path already exists before iscsi login
-		devicePath := fmt.Sprintf("/dev/disk/by-path/ip-%s:3260-iscsi-%s-lun-%d", portal, targetiqn, lun)
-		_, err := os.Stat(devicePath)
-		if !os.IsNotExist(err) {
-			_, err := os.Stat(devicePath)
-			log.Printf("WARNING: device exists (%v) before iscsi login, os.Stat err=%v", devicePath, err)
+		targetiqn, ok := pubcontext["blockid"]
+		if !ok {
+			return nil, status.Errorf(codes.Internal,"Missing 'blockid' in PubContxt: %v", pubcontext)
 		}
-		targets := make([]iscsilib.TargetInfo, 0)
-		targets = append(targets, iscsilib.TargetInfo{
-			Iqn:    targetiqn,
-			Portal: portal,
-		})
-		connector := iscsilib.Connector{
-			Targets:     targets,
-			Lun:         int32(lun),
-			DoDiscovery: true,
-			RetryCount:  10,
+		lunstr, ok2 := pubcontext["lun"]
+		if !ok2 {
+			return nil, status.Errorf(codes.Internal,"Missing 'lun' in PubContxt: %v", pubcontext)
 		}
-
-
-		iscsiDevPath, err := iscsilib.Connect(&connector)
+		lun, err := strconv.Atoi(lunstr)
 		if err != nil {
-			log.Printf("ERROR ISCSI Initiator Setup Error %+v %v \n", targets, err)
-			return nil, status.Error(codes.Unavailable, err.Error())
+			return nil, status.Errorf(codes.Internal,"Unreadable lun number in PubContxt: %v", pubcontext)
 		}
-		sourcePath = iscsiDevPath
+		portal, ok3 := pubcontext["portal"]
+		if !ok3 {
+			return nil, status.Errorf(codes.Internal,"Missing 'portal' in PubContxt: %v", pubcontext)
+		}
+
+		// Setup iscsi initiator
+		err = virsh.LoginIscsiTarget(targetiqn, portal)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal,"ISCSI Login Failes %v :: %v", pubcontext,err)
+		}
+		sourcePath := fmt.Sprintf("/dev/disk/by-path/ip-%s:3260-iscsi-%s-lun-%d", portal, targetiqn, lun)
 	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
