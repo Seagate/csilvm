@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	iscsilib "github.com/Seagate/csi-lib-iscsi/iscsi"
 	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/Seagate/csiclvm/pkg/version"
 	"github.com/Seagate/csiclvm/pkg/virsh"
@@ -1072,25 +1071,26 @@ func (s *Server) NodePublishVolume(
 		if !ok {
 			return nil, status.Errorf(codes.Internal,"Missing 'blockid' in PubContxt: %v", pubcontext)
 		}
-		lunstr, ok2 := pubcontext["lun"]
-		if !ok2 {
-			return nil, status.Errorf(codes.Internal,"Missing 'lun' in PubContxt: %v", pubcontext)
-		}
-		lun, err := strconv.Atoi(lunstr)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal,"Unreadable lun number in PubContxt: %v", pubcontext)
-		}
+		//FIXME - Assuming always Lun0 for now
+		//lunstr, ok2 := pubcontext["lun"]
+		//if !ok2 {
+		//	return nil, status.Errorf(codes.Internal,"Missing 'lun' in PubContxt: %v", pubcontext)
+		//}
+		//lun, err := strconv.Atoi(lunstr)
+		//if err != nil {
+		//	return nil, status.Errorf(codes.Internal,"Unreadable lun number in PubContxt: %v", pubcontext)
+		//}
 		portal, ok3 := pubcontext["portal"]
 		if !ok3 {
 			return nil, status.Errorf(codes.Internal,"Missing 'portal' in PubContxt: %v", pubcontext)
 		}
 
 		// Setup iscsi initiator
-		err = virsh.LoginIscsiTarget(targetiqn, portal)
+		blkdev, err := virsh.LoginIscsiTarget(targetiqn, portal)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal,"ISCSI Login Failes %v :: %v", pubcontext,err)
 		}
-		sourcePath := fmt.Sprintf("/dev/disk/by-path/ip-%s:3260-iscsi-%s-lun-%d", portal, targetiqn, lun)
+		sourcePath = blkdev
 	}
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
@@ -1410,6 +1410,8 @@ func (s *Server) NodeUnpublishVolume(
 	ctx context.Context,
 	request *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	id := request.GetVolumeId()
+	targetPath := request.GetTargetPath()
+
 	log.Printf("Looking up volume with id=%v", id)
 	lv, err := s.volumeGroup.LookupLogicalVolume(id)
 	response := &csi.NodeUnpublishVolumeResponse{}
@@ -1420,10 +1422,10 @@ func (s *Server) NodeUnpublishVolume(
 	}
 	// Clear QOS
 	virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
-	targetPath := request.GetTargetPath()
 
 	if virsh.ProxyMode() {
-		err :=  virsh.UnMountVolume(targetPath)
+		// StoLake will remove iSCSI and NVMe targets as needed during unMount
+		err :=  virsh.UnMountVolume(targetPath,id)
 		lv.Deactivate()
 		return response, err
 	}

@@ -341,7 +341,7 @@ func MountVolume(source, target, fstype, guid, mountoptions string, readonly, al
 	return err
 }
 
-func UnMountVolume(target string)  error {
+func UnMountVolume(target, volumeid string)  error {
         sc, connErr := connect()
         if connErr != nil {
                 log.Printf("Failed to connect to Server \n%v\n",connErr)
@@ -584,21 +584,119 @@ func UnStageIscsiTarget(lvuuid, initiqn string) error {
 }
 
 
-func LoginIscsiTarget(targetiqn, portal string)  error {
+func IscsiTargetExists(targetiqn, portal string)  bool {
 	var args []string
-	args = append(args, "-m", "node", "--login")
+	args = append(args, "-m", "node")
 	args = append(args, "--target", targetiqn)
-	args = append(args, "--poartal", portal)
-	res, err := virsh.ProxyStoLakeRun("iscsiadm", args...)
+	args = append(args, "--portal", portal)
+	res, err := ProxyStoLakeRun("iscsiadm", args...)
+	if err != nil {
+		log.Printf("ISCSADM LIST ERROR: %v : %v", args, err)
+	}
+	if len(res) < 100 {
+		return false
+	}
+	return  true
+
+}
+
+// Login to iscsi target and return the block device handle
+func LoginIscsiTarget(targetiqn, portal string) ( string, error) {
+	// First OS needs to discovery targets at portal
+	args := []string{ "-m", "discoverydb", "--type","sendtargets","--discover"}
+	args = append(args, "--portal", portal)
+	_, err := ProxyStoLakeRun("iscsiadm", args...)
+	if err != nil {
+		return "",  fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
+	}
+	// Next log in to target
+	args = []string{ "-m", "node", "--login"}
+	args = append(args, "--target", targetiqn)
+	args = append(args, "--portal", portal)
+	_, err = ProxyStoLakeRun("iscsiadm", args...)
+	if err != nil {
+		return "", fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
+	}
+	scsidevs, err2 := LsSscsiTransports()
+	if err != nil {
+		return "", err2
+	}
+	for _, scsidev := range scsidevs {
+		if scsidev.transport == targetiqn {
+			return scsidev.blkdev, nil
+		}
+	}
+	return "", fmt.Errorf("ISCSI Block Device not found: %v ", scsidevs)
+}
+
+func LogoutIscsiTarget(targetiqn, portal string)  error {
+	var args []string
+	args = append(args, "-m", "node", "--logout")
+	args = append(args, "--target", targetiqn)
+	args = append(args, "--portal", portal)
+	res, err := ProxyStoLakeRun("iscsiadm", args...)
 	if err != nil {
 		return  fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
 	}
-	if res != "" {
-		return  fmt.Errorf("ISCSADM FAILED: %v : %v", args, err)
+	if res != nil {
+		return  fmt.Errorf("ISCSADM FAILED: %s  %v : %v", res, args, err)
+	}
+	// delete discovery record
+	args = []string{"-m", "node", "-o", "delete"}
+	args = append(args, "--target", targetiqn)
+	res, err = ProxyStoLakeRun("iscsiadm", args...)
+	if err != nil {
+		log.Printf("WARNING: iscsiadm delete Failed:: %v -> %v \n",args, err)
 	}
 	return  nil
-
 }
+
+
+func LsSscsiTransports() ([]lsscsi, error ) {
+	args := []string{"-t"}
+	res, err := ProxyStoLakeRun("lsscsi", args...)
+	if err != nil {
+		log.Printf("LSSCSI  ERROR: %v ",  err)
+	}
+	scsidevs, err2 := parseLsScsi(res)
+	if err2 != nil {
+		log.Printf("LSSCSI PARSE ERROR: %v ",  err)
+	}
+	return scsidevs, nil
+}
+
+type lsscsi struct {
+	hctl       string
+	kind       string
+	transport  string
+	blkdev     string
+}
+
+
+func parseLsScsi(buf []byte) (devs []lsscsi, err error) {
+	for _, line := range strings.Split(string(buf), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			return nil, errors.New("Failed to parse lsscsi")
+		}
+		fmt.Printf("FIELDS: %+v, \n ", fields)
+		chnks := strings.Split(fields[2], ",")
+		dev := lsscsi{
+			hctl:        fields[0],
+			kind:        fields[1],
+			transport:   chnks[0],
+			blkdev:      fields[3],
+		}
+		devs = append(devs, dev)
+	}
+	return devs, nil
+}
+
+
+
 
 // FIXME:  Add Sycn call to StoLake
 func QosSync() error {
