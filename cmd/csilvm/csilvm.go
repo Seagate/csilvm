@@ -228,7 +228,7 @@ func main() {
 	for _, tag := range tagsF {
 		opts = append(opts, csilvm.Tag(tag))
 	}
-	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF, *stolakeF, opts...)
+	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF,  opts...)
 	if err := s.Setup(); err != nil {
 		logger.Fatalf("error initializing csilvm plugin: err=%v", err)
 	}

@@ -101,9 +101,6 @@ const TIMEOUT = 6 * time.Second //gRPC Timeout Call limit
 
 func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
 	//CSICheck()
-	log.Printf("SOCKET %s \n", StolakeURL)
-	log.Printf("STOLAKEPROXY: %s %v \n", cmd, args)
-
         sc, connErr := connect()
         if connErr != nil {
 		return nil , connErr
@@ -119,10 +116,14 @@ func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
         defer sc.ClientConn.Close()
 	if err != nil {
 		log.Print(err.Error())
-		log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	}
+	log.Printf("STOLAKEPROXY: %s %v  \n", cmd, args)
+	//log.Printf("STOLAKEPROXY: %s %v RESULT: %s \n", cmd, args, res)
 	return []byte(res.GetStdout()), err
 }
+
+
+
 
 func SetStolakeURL(urlstr string) bool {
 	_, err := url.Parse(urlstr)
@@ -312,6 +313,25 @@ func FstypeProxy(devicepath string) (string, error) {
 		log.Printf("STOLAKEPROXY RESULT: %v \n", res)
 	}
 	return string(res.GetFsType()), err
+}
+
+
+func MountInfo() ([]byte, error) {
+	//CSICheck()
+        sc, connErr := connect()
+        if connErr != nil {
+		return nil , connErr
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.MountInfoReq{}
+	res, err := sc.Client.MountInfo(ctx, req)
+        defer sc.ClientConn.Close()
+	if err != nil {
+		log.Print(err.Error())
+	}
+	return []byte(res.GetInfo()), err
 }
 
 
@@ -633,21 +653,20 @@ func LogoutIscsiTarget(targetiqn, portal string)  error {
 	var args []string
 	args = append(args, "-m", "node", "--logout")
 	args = append(args, "--target", targetiqn)
-	args = append(args, "--portal", portal)
+	//args = append(args, "--portal", portal)
 	res, err := ProxyStoLakeRun("iscsiadm", args...)
 	if err != nil {
-		return  fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
+		log.Printf("ERROR: from Proxy :: %v -> %v \n",args, err)
 	}
-	if res != nil {
-		return  fmt.Errorf("ISCSADM FAILED: %s  %v : %v", res, args, err)
-	}
+	log.Printf("DEBUG: iscsiadm  %v -> %s \n",args, res)
 	// delete discovery record
 	args = []string{"-m", "node", "-o", "delete"}
 	args = append(args, "--target", targetiqn)
 	res, err = ProxyStoLakeRun("iscsiadm", args...)
 	if err != nil {
-		log.Printf("WARNING: iscsiadm delete Failed:: %v -> %v \n",args, err)
+		log.Printf("WARNING: iscsiadm delete Failed:: %v -> %s \n",args, err)
 	}
+	log.Printf("DEBUG: iscsiadm  %v -> %s \n",args, res)
 	return  nil
 }
 
@@ -682,7 +701,6 @@ func parseLsScsi(buf []byte) (devs []lsscsi, err error) {
 		if len(fields) < 4 {
 			return nil, errors.New("Failed to parse lsscsi")
 		}
-		fmt.Printf("FIELDS: %+v, \n ", fields)
 		chnks := strings.Split(fields[2], ",")
 		dev := lsscsi{
 			hctl:        fields[0],
@@ -771,8 +789,6 @@ func connect() (*Stolakeclient, error) {
         if err != nil {
                 logger.Error(err, "Failed to connect to Server")
                 log.Printf("Failed to connect to Server \n%v\n",err)
-        } else {
-                log.Printf("Connection to gRPC Server Established !!")
         }
         c := pb.NewStolakeClient(conn)
 

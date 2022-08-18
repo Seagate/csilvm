@@ -40,7 +40,6 @@ type Server struct {
 	supportedFilesystems map[string]string
 	removingVolumeGroup  bool
 	controllerMode       bool
-	ovirtHost            string
 	tags                 []string
 	probeModules         map[string]struct{}
 	nodeID               string
@@ -52,7 +51,7 @@ type Server struct {
 // default options can be overwritten. The Setup method must be called before
 // any other further method calls are performed in order to setup/remove the
 // volume group.
-func NewServer(vgname string, pvnames []string, defaultFs string, ovirthost string, opts ...ServerOpt) *Server {
+func NewServer(vgname string, pvnames []string, defaultFs string, opts ...ServerOpt) *Server {
 	const (
 		// Unless overwritten by the DefaultVolumeSize
 		// ServerOpt the default size for new volumes is
@@ -67,7 +66,6 @@ func NewServer(vgname string, pvnames []string, defaultFs string, ovirthost stri
 			"":        defaultFs,
 			defaultFs: defaultFs,
 		},
-		ovirtHost: ovirthost,
 		metrics:   tally.NoopScope,
 	}
 	for _, opt := range opts {
@@ -100,10 +98,6 @@ func (s *Server) RemovingVolumeGroup() bool {
 
 func (s *Server) ControllerMode() bool {
 	return s.controllerMode
-}
-
-func (s *Server) OvirtHost() string {
-	return s.ovirtHost
 }
 
 type ServerOpt func(*Server)
@@ -716,7 +710,10 @@ func (s *Server) ControllerUnpublishVolume(
 	volumeID := request.GetVolumeId()
 	lv, err := s.volumeGroup.LookupLogicalVolume(volumeID)
 	if err != nil {
-		return response, ErrVolumeNotFound
+		//NOTE: The CSI spec say to reply with error if the volume is  "is not assumed to be ControllerUnpublished"
+		// If the lv was not found we assume it has been unpublished
+		return response, nil
+		//return response, ErrVolumeNotFound
 	}
 
 	// FIXME: Need to discover how the volume is published to the node and undo it selectively 
@@ -1412,58 +1409,84 @@ func (s *Server) NodeUnpublishVolume(
 	id := request.GetVolumeId()
 	targetPath := request.GetTargetPath()
 
-	log.Printf("Looking up volume with id=%v", id)
-	lv, err := s.volumeGroup.LookupLogicalVolume(id)
-	response := &csi.NodeUnpublishVolumeResponse{}
-	if err != nil {
-		lv.Deactivate()
-		// Repond good if not found for idempotency
-		return response, nil
-	}
-	// Clear QOS
-	virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
-
-	if virsh.ProxyMode() {
-		// StoLake will remove iSCSI and NVMe targets as needed during unMount
-		err :=  virsh.UnMountVolume(targetPath,id)
-		lv.Deactivate()
-		return response, err
-	}
-
+	// We don't have a way to know at this point the data path of the mounted target.
+	// First find the source of the mounted PVC.  
 	mp, err := getMountAt(targetPath)
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Cannot get mount info at %v: err=%v",
-			targetPath, err)
+		return nil, status.Errorf(codes.Internal, "Cannot get mount info at %v: err=%v",	targetPath, err)
 	}
-	log.Printf("Mount info at %v: %+v", targetPath, mp)
-	if mp != nil {
-		const umountFlags = 0
-		log.Printf("Unmounting %v", targetPath)
-		if err := syscall.Unmount(targetPath, umountFlags); err != nil {
-			_, ok := err.(syscall.Errno)
-			if !ok {
-				return nil, status.Errorf(
-					codes.Internal,
-					"Failed to perform unmount: err=%v",
-					err)
+
+	response := &csi.NodeUnpublishVolumeResponse{}
+	if mp == nil {
+		// FIXME: If the targetPath doesn't exist there may be iscsi session that should be logged out.
+		log.Printf("TargetPath not found %s", targetPath)
+		return response, nil
+	}
+	var lv  *lvm.LogicalVolume
+	switch strings.ToLower(mp.datapath) {
+		case "iscsi":
+			log.Printf("Unmounting iscsi device %+v", mp)
+			err :=  virsh.UnMountVolume(targetPath,id)
+			chunks := strings.SplitN(mp.blockpath, "-",4)
+			log.Printf("CHUNKS %+v", chunks)
+			if len(chunks) > 3{
+				// Trim off lun-0 from end of path
+				itarget := chunks[3][0:len(chunks[3])-6]
+				err:= virsh.LogoutIscsiTarget(itarget,chunks[1])
+				log.Printf("TARGET %s  PORTAL %s", itarget, chunks[1])
+				if err != nil {
+					log.Printf("ISCSI Logout failed %v", err)
+				}
 			}
+			return response, err
+
+		case "nvme":
+			log.Printf("Unmounting nvme device %s", mp.blockpath)
+			err :=  virsh.UnMountVolume(targetPath,id)
+			return response, err
+
+		case "qemu":
+			log.Printf("Unmounting qemu device %s : %s", mp.blockpath,id)
+			err :=  virsh.UnMountVolume(targetPath,id)
+			return response, err
+
+		case "sas":
+			log.Printf("Unmounting SAS device %s : %s", mp.blockpath,id)
+			//var err  error
+			lv, err = s.volumeGroup.LookupLogicalVolume(id)
+			// Clear QOS
+			virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
+
+		default:
+			log.Printf("Unmounting Unknown datapath device %s", mp.blockpath)
+
+	}
+
+
+	// Common Unmount for Non-Proxy Modes
+	const umountFlags = 0
+	log.Printf("Unmounting %v", targetPath)
+	if err := syscall.Unmount(targetPath, umountFlags); err != nil {
+		_, ok := err.(syscall.Errno)
+		if !ok {
 			return nil, status.Errorf(
-				codes.FailedPrecondition,
+				codes.Internal,
 				"Failed to perform unmount: err=%v",
 				err)
 		}
-	}
-	log.Printf("Deleting Target Path  %s", targetPath)
-	os.RemoveAll(targetPath)
-	if err := lv.Deactivate(); err != nil {
 		return nil, status.Errorf(
-			codes.Internal,
-			"Failed to de-activate volume: err=%v",
+			codes.FailedPrecondition,
+			"Failed to perform unmount: err=%v",
 			err)
 	}
-	log.Printf("Logical Volume De-Activated  %s", lv.Name())
+
+	log.Printf("Deleting Target Path  %s", targetPath)
+	os.RemoveAll(targetPath)
+
+	// Post Unmount Clean Up
+	if err := lv.Deactivate(); err != nil {
+		log.Printf("Failed to de-activate volume: err=%v", err)
+	}
 	return response, nil
 }
 

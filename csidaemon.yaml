@@ -54,6 +54,8 @@ spec:
             mountPath: /usr/sbin/iscsiadm
           - name: iscsiadm-libs
             mountPath: /usr/lib64
+          - name: diskbypath
+            mountPath: /dev/disk/by-path
 
         command: ["/stolake/csilvm"]
         args: ["-controller", "-stolake-socket", "/var/run/stolake", "-volume-group", "sbvg_datalake", "-unix-addr=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock", "-node-id", spec.nodeName ]
@@ -81,5 +83,10 @@ spec:
       - name: iscsiadm-libs
         hostPath:
           path: /usr/lib64
+          type: Directory
+
+      - name: diskbypath
+        hostPath:
+          path: /dev/disk/by-path
           type: Directory
 
