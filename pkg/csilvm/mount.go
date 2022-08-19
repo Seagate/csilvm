@@ -99,6 +99,9 @@ func parseMountinfo(buf []byte) (mounts []mountpoint, err error) {
 			blockpath:   blockpath,
 			datapath:    dataPathType(blockpath),
 		}
+		if  mount.datapath == "" {
+			fmt.Printf("NO DATAPATH::%v \n", mount)
+		}
 		mounts = append(mounts, mount)
 	}
 	return mounts, nil
@@ -134,6 +137,12 @@ func getMountsAt(path string) ([]mountpoint, error) {
 }
 
 func getBlockPath(blkdev string) string {
+	// if LVM2 LV then return blkdev and blockpath
+	if len(blkdev) > 10 {
+		if blkdev[0:10] == "/dev/sbvg_" {
+			return blkdev 
+		}
+	}
 	cmd := exec.Command("ls", "-lt", "/dev/disk/by-path/")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -156,13 +165,20 @@ func getBlockPath(blkdev string) string {
 			return words[len(words)-1]
 		}
 	}
-
+	fmt.Printf("FAILED to find %s in BY-PATH list ::%s \n", blkdev, out.String())
 	return ""
 }
 
 func dataPathType(path string) string {
+	// If blockpath is LVM2 LV then return sas
+	if len(path) > 10 {
+		if path[0:10] == "/dev/sbvg_" {
+			return "sas" 
+		}
+	}
 	chunks := strings.Split(path,"-")
 	if len(chunks) < 4 {
+		fmt.Printf("FAILED to parse BY-PATH ::%+v ", chunks)
 		return ""
 	}
 	return chunks[2]

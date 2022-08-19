@@ -1456,38 +1456,45 @@ func (s *Server) NodeUnpublishVolume(
 			lv, err = s.volumeGroup.LookupLogicalVolume(id)
 			// Clear QOS
 			virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
+			if virsh.ProxyMode() {
+				err :=  virsh.UnMountVolume(targetPath,id)
+				return response, err
+			} else {
+				// Unmount not containerized
+				const umountFlags = 0
+				log.Printf("Unmounting %v", targetPath)
+				if err := syscall.Unmount(targetPath, umountFlags); err != nil {
+					_, ok := err.(syscall.Errno)
+					if !ok {
+						return nil, status.Errorf(codes.Internal, "Failed to perform unmount: err=%v", err)
+					}
+					return nil, status.Errorf(
+						codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+				}
+			}
+			if err := lv.Deactivate(); err != nil {
+				log.Printf("Failed to de-activate volume: err=%v", err)
+			}
+			return response, nil
 
 		default:
-			log.Printf("Unmounting Unknown datapath device %s", mp.blockpath)
-
-	}
-
-
-	// Common Unmount for Non-Proxy Modes
-	const umountFlags = 0
-	log.Printf("Unmounting %v", targetPath)
-	if err := syscall.Unmount(targetPath, umountFlags); err != nil {
-		_, ok := err.(syscall.Errno)
-		if !ok {
-			return nil, status.Errorf(
-				codes.Internal,
-				"Failed to perform unmount: err=%v",
-				err)
+			log.Printf("Unmounting Unknown datapath device %s :: %v", mp.datapath,mp)
+			const umountFlags = 0
+			log.Printf("Unmounting %v", targetPath)
+			if err := syscall.Unmount(targetPath, umountFlags); err != nil {
+				_, ok := err.(syscall.Errno)
+				if !ok {
+					return nil, status.Errorf(codes.Internal, "Failed to perform unmount: err=%v", err)
+				}
+				return nil, status.Errorf(
+					codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+			log.Printf("Deleting Target Path  %s", targetPath)
+			os.RemoveAll(targetPath)
+			return response, nil
 		}
-		return nil, status.Errorf(
-			codes.FailedPrecondition,
-			"Failed to perform unmount: err=%v",
-			err)
 	}
-
-	log.Printf("Deleting Target Path  %s", targetPath)
-	os.RemoveAll(targetPath)
-
-	// Post Unmount Clean Up
-	if err := lv.Deactivate(); err != nil {
-		log.Printf("Failed to de-activate volume: err=%v", err)
-	}
-	return response, nil
+	// Can't Happen
+	return nil, status.Errorf(codes.Internal,"ERROR with Unpublish handling")
 }
 
 func (s *Server) NodeGetInfo(
