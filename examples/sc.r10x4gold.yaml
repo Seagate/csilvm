@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   name: raid10x4gold
+provisioner: prow.speedboat.seagate.com
+reclaimPolicy: Delete
+parameters:
+   type: raid10
+   stripes: "4"
+   nosync: "yes"
+   iopspergb: "6"
+   mbpspergb: "0.48"

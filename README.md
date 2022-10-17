@@ -1,12 +1,127 @@
-# CSI plugin for LVM2 [![Issues](https://img.shields.io/badge/Issues-JIRA-ff69b4.svg?style=flat)](https://jira.mesosphere.com/issues/?jql=project%20%3D%20DCOS_OSS%20and%20component%20%3D%20csilvm%20and%20status%20not%20in%20(Resolved%2C%20Closed)) [![Build Status](https://jenkins.mesosphere.com/service/jenkins/buildStatus/icon?job=public-csilvm-pipeline/csilvm-pipelines/master)](https://jenkins.mesosphere.com/service/jenkins/job/public-csilvm-pipeline/job/csilvm-pipelines/job/master/)
+# CSI plugin for Shared LVM2 Volume Groups 
 
-This is a [container storage interface (CSI)](https://github.com/container-storage-interface/spec) plugin for LVM2.
-It exposes a CSI-compliant API to a LVM2 volume group (VG).
-The names of the volume group (VG) and the physical volumes (PVs) it consists of are passed to the plugin at launch time as command-line parameters.
-CSI volumes map to LVM2 logical volumes (LVs).
+This is a [container storage interface (CSI)](https://github.com/container-storage-interface/spec) plugin for Linux LVM2 using [lvmlockd](https://man7.org/linux/man-pages/man8/lvmlockd.8.html) for multihost shared Volume Groups.
+LVM2 Logical Volumes are dynamically provisions as Kubernetes Physical Volume Claims out of a Volume Group identified by a CSI StorageClass.
+A LVM2 Volume Group may have more than one Storage Class for orchestrated control of quality of service and resiliency from the same pool.  
 
-## Getting Started
+Optimal performance is achieved when node servers are directly connected to an external storage enclosure.
+Pods started on nodes without a direct connection to the drives will use iSCSI or NVMeoF for communication with a Controller Agent node.
 
+
+## Prerequisites
+* While not required, the [Seagate Propeller](https://github.com/Seagate/propeller) project provides a robust and stable version of lvmlockd which is supported by LVM2 version 2.3.13 or later when compiled with the enable-lvmlockd-idm option.
+Red Hat 8.6 (and derivatives) come with LVM2 v2.3.14.
+* The In-Drive Mutex feature of Seagate Nytro 3050 series SAS SSDs can be enabled with IDM feature.  Please contact your Seagate Representative for details.
+* Kubernetes version 1.18 or later is recommended.
+* The StoLake gRPC agent must be running on all nodes using this CSI Plugin.
+
+
+
+# Getting Started
+
+## Enable IDM Locking Mode in LVM2
+Validate that IDM option is configured on all controller nodes (those directly connected to the drives).
+
+```bash
+# lvm version |grep idm
+  Configuration:   ./configure --build=x86_64-redhat-linux-gnu  
+  ... 
+  --enable-lvmlockd-idm 
+  ...
+```
+
+If not enabled, [manually recompile](https://www.linuxfromscratch.org/blfs/view/svn/postlfs/lvm2.html) the LVM2 package adding the "--enable-lvmlockd-idm" option when running configure.  Or use a precompiled LVM2 rpm package provided for convenience in the deploy/lvm2 directory.
+
+## Install StoLake gRPC Agent
+Install the StoLake gRPC agent on each node of the cluster following the instructions in the project. See https://github.com/Seagate/stolake
+
+## Create a LVM2 Shared Volume Group
+When creating a Volume Group that will shared between multiple servers directly connected to the drives (this includes iSCSI and NVMeoF), the --shared flag must be used.  Specify the locktype as idm when using the Seagate lvmlockd service of the Propeller project.  The example below creates a VG with the name of datalake using two drives (sdc, sdd).
+
+```bash
+ vgcreate --shared --locktype idm sbvg_datalake /dev/sdc /dev/sdd
+```
+
+This command can be run on any of the servers connected to the drives.  Once created the other servers may need to rescan the block devices to discover the new lvm2 VG using the partprobe command
+
+## Deploy CSI Plug-in
+Each LVM2 Volume Group requires its own CSI plug-in.  This enables multiple tenant, each with their own K8s namespace to use the same drives as packing storage for the VGs.
+
+The deployment scripts under /deploy matching your Kubernetes version start the CSI Plug-in.  The default is to use a LVM2 VG named "sbvg_datalake".  To start a plug-in for a different VG grep for datalake and change all occurances.
+
+```bash
+[root@Simon kubernetes-1.18]# grep -r datalake *
+clvm/csi-clvm-provisioner.yaml:            path: /var/lib/kubelet/plugins/datalake.speedboat.seagate.com
+clvm/csi-clvm-attacher.yaml:            path: /var/lib/kubelet/plugins/datalake.speedboat.seagate.com
+clvm/csi-clvm-plugin.yaml:            - --kubelet-registration-path=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock
+clvm/csi-clvm-plugin.yaml:            path: /var/lib/kubelet/plugins/datalake.speedboat.seagate.com
+csiclvm.service:ExecStart=/var/speedboat/mercury/csiclvm  -volume-group sbvg_datalake -unix-addr=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock -ovirt-ip=10.2.28.147
+```
+NOTE: The provisioner name does not include the "sbvg_" prefix.
+
+Then run the deploy.sh script to start the CSI driver controllers, node agents, and sidecars.
+
+Use the drop.sh stop the CSI sidecars, controllers and node agents.
+
+## Create CSI Storage Classes
+Every CSI persistent volume is associated to a StorageClass that specifies the provisioner and any attributes unique to that StorageClass. 
+
+Multiple StorageClasses may be defined to use the same provisioner(LVM2 Volume Group's CSI Plug-in) and underlying storage for a mix of RAID of LVs in the VG.
+
+See the storageclass.yaml file for a description of the possible options of a CSICLVM StorageClass which includes, RAID, Datapath and Quality of Service constraints.
+
+Once configured apply the StorageClass to the cluster:
+
+```bash
+kubectl apply -f storageclass.yaml
+```
+
+## Creating Logical Volumes
+The CSI driver will create logic volumes based on the attributes of the CSI Storage Class used.  The driver will generate a cluster unique LVM2 volume name for the CSI Persistent Volume.  Create a yaml file for the Persistent Volume associated to StorageClass.  If you have an existing LV or manually create a LVM2 LV the use the optional volumeHandle to associate the LVM2 LV with the CSI Persistent Volume.   
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nginx-data-example
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: clvmstorageclass
+  csi:
+    driver: datalake.speedboat.seagate.com
+    volumeHandle: NAME.OF.LVM2.LOGICAL.VOLUME.IN.VOLUME.GROUP
+```
+
+## Using CSI Persistent Volumes
+Use CSICLVM PVs like any other CSI Persistent Volumes by modifying the Pod sped to mount the PV.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - image: nginx:latest
+    imagePullPolicy: Always
+    name: nginx
+    ports:
+    - containerPort: 80
+      protocol: TCP
+    volumeMounts:
+      - mountPath: /var/www
+        name: http-root
+  volumes:
+  - name: http-root
+    persistentVolumeClaim:
+      claimName: nginx-data-example
+```
+
+
+# Developers
 
 ### Setting up your local environment
 
@@ -16,9 +131,7 @@ Newer versions of Go should work.
 
 You can `go get` the source code from GitHub.
 
-```bash
-go get -v github.com/mesosphere/csilvm
-```
+
 
 If you want to work on the code I suggest the following workflow.
 
@@ -141,38 +254,44 @@ It is expected that the Plugin Supervisor will launch the binary using the appro
 ```
 $ ./csilvm --help
 Usage of ./csilvm:
+  -build-version string
+        v0.37-stolake
+  -controller
+        If set, the agent will server operat as both a node and controller agent.
   -default-fs string
-    	The default filesystem to format new volumes with (default "xfs")
+        The default filesystem to format new volumes with (default "xfs")
   -default-volume-size uint
-    	The default volume size in bytes (default 10737418240)
+        The default volume size in bytes (default 10737418240)
   -devices string
-    	A comma-seperated list of devices in the volume group
+        A comma-seperated list of devices in the volume group
   -lockfile string
-    	The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances
+        The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances (default "/run/csilvm.lock")
   -node-id string
-    	The node ID reported via the CSI Node gRPC service
+        The node ID reported via the CSI Node gRPC service (default "Simon")
   -probe-module value
-    	Probe checks that the kernel module is loaded
+        Probe checks that the kernel module is loaded
   -remove-volume-group
-    	If set, the volume group will be removed when ProbeNode is called.
+        If set, the volume group will be removed when ProbeNode is called.
   -request-limit int
-    	Limits backlog of pending requests. (default 10)
+        Limits backlog of pending requests. (default 10)
   -statsd-format string
-    	The statsd format to use (one of: classic, datadog) (default "datadog")
+        The statsd format to use (one of: classic, datadog) (default "datadog")
   -statsd-max-udp-size int
-    	The size to buffer before transmitting a statsd UDP packet (default 1432)
+        The size to buffer before transmitting a statsd UDP packet (default 1432)
   -statsd-udp-host-env-var string
-    	The name of the environment variable containing the host where a statsd service is listening for stats over UDP
+        The name of the environment variable containing the host where a statsd service is listening for stats over UDP
   -statsd-udp-port-env-var string
-    	The name of the environment variable containing the port where a statsd service is listening for stats over UDP
+        The name of the environment variable containing the port where a statsd service is listening for stats over UDP
+  -stolake-socket string
+        The URL for the StoLake gRPC agent to be used instead of issuing local LVM commands.
   -tag value
-    	Value to tag the volume group with (can be given multiple times)
+        Value to tag the volume group with (can be given multiple times)
   -unix-addr string
-    	The path to the listening unix socket file
+        The path to the listening unix socket file
   -unix-addr-env string
-    	An optional environment variable from which to read the unix-addr
+        An optional environment variable from which to read the unix-addr
   -volume-group string
-    	The name of the volume group to manage
+        The name of the volume group to manage
 ```
 
 
@@ -182,22 +301,6 @@ The plugin listens on a unix socket.
 The unix socket path can be specified using the `-unix-addr=<path>` command-line option.
 The unix socket path can also be specified using the `-unix-addr-env=<env-var-name>` option in which case the path will be read from the environment variable of the given name.
 It is expected that the CO will connect to the plugin through the unix socket and will subsequently communicate with it in accordance with the CSI specification.
-
-
-### Locking
-
-Any command-line invocations executed by the `csilvm` process first acquires a
-lock on a lockfile. The path to the lockfile can be overridden using the
-`-lockfile=` option or the `CSILVM_LOCKFILE_PATH` environment variable. The
-locking behaviour can be disabled by setting the `-lockfile=` option to the
-empty string. The purpose of locking around command-line invocations is to
-prevent multiple `csilvm` processes from executing concurrent `lvm2` commands.
-This works around deadlocks in lvm2. For example,
-https://jira.mesosphere.com/browse/DCOS_OSS-5434 and
-https://github.com/lvmteam/lvm2/issues/23.
-
-By default the lock file is created at `/run/csilvm.lock` so it is assumed that
-the `/run` directory exists and is writable by the `csilvm` process.
 
 
 ### Logging
@@ -263,35 +366,10 @@ It should work with newer versions of lvm2 that are backwards-compatible in thei
 It may work with older versions.
 
 
-### Startup
 
-When the plugin starts it performs checks and initialization.
+## Notes
 
-Note that, as with all software, the source of truth is the code.
-The initialization logic lives in the `(*Server).Setup()` function in `./pkg/csilvm/server.go`.
-
-If the `-remove-volume-group` flag is provided the volume group will be removed during `Setup`.
-If at that point the volume group is not found, it is assumed that it was successfully removed and `Setup` succeeds.
-The PVs are not removed or cleared.
-
-If the `-remove-volume-group` flag is NOT provided the volume group is looked up.
-If the volume group already exists, the plugin checks whether the PVs that constitute that VG matches the list of devices provided on the command-line in the `-devices=<dev1,dev2,...>` flag.
-Next it checks whether the volume group tags match the `-tag` list provided on the command-line.
-
-If the volume group does not already exist, the plugin looks up the provided list of PVs corresponding to the `-devices=<dev1,dev2,...>` provided on the command-line.
-For each, if it isn't already a LVM2 PV, it zeroes the partition table and runs `pvcreate` to initialize it.
-Once all the PVs exist, the new volume group is created consisting of those PVs and tagged with the provided `-tag` list.
-
-
-### Notes
-
-
-#### Locking
-
-The plugin is completely stateless and performs no locking around operations.
-Instead, it relies on LVM2 to lock around operations that are not reentrant.
-
-#### Logical volume naming
+### Logical volume naming
 
 The volume group name is specified at startup through the `-volume-group` argument.
 
@@ -307,18 +385,8 @@ Examples:
 * If the CO-specified volume name is `test-volume`, then the generated LV tag is `VN.test-volume`.
 * If the CO-specified volume name is `hello volume`, then the generated LV tag is `VN+aGVsbG8gdm9sdW1l`.
 
-#### Logical volume sizes
 
-The `CreateVolume` RPC will attempt to allocate a volume size that both:
-
-* satisfies the requested capacity with the range limits given, and;
-* aligns with an LVM extent boundary (LVM default is 4MiB)
-
-The plugin will choose the smallest size within the requested capacity range that aligns to an extent boundary.
-If the plugin cannot align on an extent boundary within the requested capacity range, then the `CreateVolume` RPC will return an error.
-For example, if the requested capacity is *exactly* 25MiB (RequiredBytes = LimitBytes = 25MiB) then the RPC will fail because 25MiB does not align to the default 4MiB extent boundary.
-
-#### SINGLE_NODE_READER_ONLY
+### SINGLE_NODE_READER_ONLY
 
 It is not possible to bind mount a device as 'ro' and thereby prevent write access to it.
 
@@ -327,13 +395,12 @@ volume of access type `BLOCK_DEVICE`.
 
 # Issues
 
-This project uses JIRA instead of GitHub issues to track bugs and feature requests.
-You may review the [currently open issues](https://jira.mesosphere.com/issues/?jql=project%20%3D%20DCOS_OSS%20and%20component%20%3D%20csilvm%20and%20status%20not%20in%20(Resolved%2C%20Closed)).
-You may also create a new [bug](https://jira.mesosphere.com/secure/CreateIssueDetails!init.jspa?pid=14105&issuetype=1&components=20732&customfield_12300=3&summary=CSILVM%3a+bug+summary+goes+here&description=Environment%3a%0d%0dWhat+you+attempted+to+do%3a%0d%0dThe+result+you+expected%3a%0d%0dThe+result+you+saw+instead%3a%0d&priority=3) or a new [task](https://jira.mesosphere.com/secure/CreateIssueDetails!init.jspa?pid=14105&issuetype=3&components=20732&customfield_12300=3&summary=CSILVM%3a+task+summary+goes+here&priority=3).
+You may create a new [bug](https://jira.mesosphere.com/secure/CreateIssueDetails!init.jspa?pid=14105&issuetype=1&components=20732&customfield_12300=3&summary=CSILVM%3a+bug+summary+goes+here&description=Environment%3a%0d%0dWhat+you+attempted+to+do%3a%0d%0dThe+result+you+expected%3a%0d%0dThe+result+you+saw+instead%3a%0d&priority=3) or a new [task](https://jira.mesosphere.com/secure/CreateIssueDetails!init.jspa?pid=14105&issuetype=3&components=20732&customfield_12300=3&summary=CSILVM%3a+task+summary+goes+here&priority=3).
 
 
 # Authors
 
+* @TProhofsky
 * @gpaul
 * @jdef
 * @jieyu
