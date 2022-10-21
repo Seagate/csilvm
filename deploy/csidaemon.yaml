@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: csiclvm-controllers
+spec:
+  selector:
+    matchLabels:
+      app: csiclvmagent # has to match .spec.template.metadata.labels
+  template:
+    metadata:
+      labels:
+        app: csiclvmagent # has to match .spec.selector.matchLabels
+    spec:
+      terminationGracePeriodSeconds: 10
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+                - key: storagelake
+                  operator: In
+                  values:
+                  - controller
+      containers:
+      - image: ghcr.io/tprohofsky/csiclvm:dev
+        imagePullPolicy: Always
+        name: csiclvm
+        securityContext: 
+          privileged: true
+        env:
+        - name: CSI_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CSI_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        volumeMounts:
+            # Stolake socket running outside K8s on base OS
+          - mountPath: /var/run/stolake
+            name: stolakesocket
+
+            # The CSI agent presented for the K8s sidecars
+          - mountPath: /var/lib/kubelet/plugins
+            name: csisocketdir
+
+            # Node Agents need to fetch their initiator's IQN
+          - mountPath: /etc/iscsi
+            name: iscsidir
+
+            # Access to iscsiadm for Node Agents
+          - name: iscsiadm
+            mountPath: /usr/sbin/iscsiadm
+          - name: iscsiadm-libs
+            mountPath: /usr/lib64
+          - name: diskbypath
+            mountPath: /dev/disk/by-path
+
+        command: ["/stolake/csilvm"]
+        args: ["-controller", "-stolake-socket", "/var/run/stolake", "-volume-group", "sbvg_datalake", "-unix-addr=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock", "-node-id", spec.nodeName ]
+      volumes:
+      - name: stolakesocket
+        hostPath:
+          path: /var/lib/kubelet/device-plugins/stolake.seagate.sock
+          type: Socket
+
+      - name: csisocketdir
+        hostPath:
+          path: /var/lib/kubelet/plugins
+          type: Directory
+
+      - name: iscsidir
+        hostPath:
+          path: /etc/iscsi/
+          type: Directory
+
+      - name: iscsiadm
+        hostPath:
+          path: /usr/sbin/iscsiadm
+          type: File
+
+      - name: iscsiadm-libs
+        hostPath:
+          path: /usr/lib64
+          type: Directory
+
+      - name: diskbypath
+        hostPath:
+          path: /dev/disk/by-path
+          type: Directory
+

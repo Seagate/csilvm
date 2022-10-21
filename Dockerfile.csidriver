@@ -1,0 +1,8 @@
+
+FROM rockylinux/rockylinux:8.4
+
+copy csilvm /stolake/
+
+WORKDIR /stolake
+
+CMD /stolake/csilvm

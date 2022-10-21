@@ -1,0 +1,9 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   name: clvm-iscsi
+provisioner: datalake.speedboat.seagate.com
+reclaimPolicy: Delete
+parameters:
+   datapath: iscsi
+

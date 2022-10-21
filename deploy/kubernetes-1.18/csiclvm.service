@@ -1,0 +1,19 @@
+[Unit]
+Description=CSI Driver for Clustered LMV2 - Speedboat Project
+After=network.target
+
+[Service]
+StartLimitBurst=5
+StartLimitInterval=10
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=Mercury
+WorkingDirectory=/var/speedboat/mercury
+ExecStart=/var/speedboat/mercury/csiclvm  -volume-group sbvg_datalake -unix-addr=/var/lib/kubelet/plugins/datalake.speedboat.seagate.com/csi.sock -ovirt-ip=10.2.28.147
+
+[Install]
+WantedBy=multi-user.target

@@ -8,20 +8,22 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path"
 	"strings"
 	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/Seagate/csiclvm/pkg/csilvm"
 	"github.com/Seagate/csiclvm/pkg/lvm"
 	"github.com/Seagate/csiclvm/pkg/version"
+	"github.com/Seagate/csiclvm/pkg/virsh"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 
 	datadogstatsd "github.com/DataDog/datadog-go/statsd"
-	"github.com/cactus/go-statsd-client/statsd"
 	"github.com/Seagate/csiclvm/pkg/ddstatsd"
+	"github.com/cactus/go-statsd-client/statsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 )
@@ -63,12 +65,15 @@ func main() {
 	socketFileF := flag.String("unix-addr", "", "The path to the listening unix socket file")
 	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
 	removeF := flag.Bool("remove-volume-group", false, "If set, the volume group will be removed when ProbeNode is called.")
+	controllerF := flag.Bool("controller", false, "If set, the agent will server operat as both a node and controller agent.")
 	var tagsF stringsFlag
 	flag.Var(&tagsF, "tag", "Value to tag the volume group with (can be given multiple times)")
 	var probeModulesF stringsFlag
 	flag.Var(&probeModulesF, "probe-module", "Probe checks that the kernel module is loaded")
-	nodeIDF := flag.String("node-id", "", "The node ID reported via the CSI Node gRPC service")
+	thishost, _ := os.Hostname()
+	nodeIDF := flag.String("node-id", thishost, "The node ID reported via the CSI Node gRPC service")
 	lockFilePathF := flag.String("lockfile", defaultLockfilePathOrEnv(), "The path to the lock file used to prevent concurrent lvm invocation by multiple csilvm instances")
+	stolakeF := flag.String("stolake-socket", "", "The URL for the StoLake gRPC agent to be used instead of issuing local LVM commands. ")
 	// Metrics-related flags
 	statsdUDPHostEnvVarF := flag.String("statsd-udp-host-env-var", "", "The name of the environment variable containing the host where a statsd service is listening for stats over UDP")
 	statsdUDPPortEnvVarF := flag.String("statsd-udp-port-env-var", "", "The name of the environment variable containing the port where a statsd service is listening for stats over UDP")
@@ -82,6 +87,10 @@ func main() {
 	logger := log.New(os.Stderr, logprefix, logflags)
 	csilvm.SetLogger(logger)
 	lvm.SetLogger(logger)
+	// Specifying the VG is mandatory to start server.
+	if  *vgnameF == "" {
+		logger.Fatalf("FAILED TO START: volume-group is not specified starting CSI Agent.")
+	}
 	// Setup LVM operation lock file.
 	// See
 	// - https://jira.mesosphere.com/browse/DCOS_OSS-5434
@@ -104,6 +113,13 @@ func main() {
 	logger.Printf("Unlinking socket file in case it still exists: %q", sock)
 	if err := syscall.Unlink(sock); err != nil {
 		logger.Printf("Failed to unlink socket file: %v", err)
+	}
+	// Make directory path for socket if doesn't exist
+	if _, err := os.Stat(path.Dir(sock)); os.IsNotExist(err) {
+		err := os.Mkdir(path.Dir(sock), os.ModePerm)
+		if err != nil {
+			logger.Fatalf("Failed to create socket directory: %s ::%v", path.Dir(sock), err)
+		}
 	}
 	// Setup socket listener
 	lis, err := net.Listen("unix", sock)
@@ -191,6 +207,9 @@ func main() {
 			),
 		),
 	)
+	if !virsh.SetStolakeURL(*stolakeF) {
+		logger.Fatalf("Invalid StoLake URL. ")
+	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	opts := []csilvm.ServerOpt{
 		csilvm.NodeID(*nodeIDF),
@@ -203,10 +222,13 @@ func main() {
 	if *removeF {
 		opts = append(opts, csilvm.RemoveVolumeGroup())
 	}
+	if *controllerF {
+		opts = append(opts, csilvm.ControllerMode())
+	}
 	for _, tag := range tagsF {
 		opts = append(opts, csilvm.Tag(tag))
 	}
-	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF, opts...)
+	s := csilvm.NewServer(*vgnameF, strings.Split(*pvnamesF, ","), *defaultFsF,  opts...)
 	if err := s.Setup(); err != nil {
 		logger.Fatalf("error initializing csilvm plugin: err=%v", err)
 	}

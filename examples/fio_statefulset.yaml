@@ -1,0 +1,69 @@
+#https://medium.com/@joshua_robinson/storage-benchmarking-with-fio-in-kubernetes-14cf29dc5375
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: fio-job-config
+data:
+  fio.job: |-
+    [global]
+    ioengine=libaio
+    #direct=1
+    group_reporting
+    norandommap
+    randrepeat=0
+    [testjob]
+    bs=128K
+    rw=write
+    iodepth=32
+    numjobs=1
+    size=45Gi
+    stonewall
+    [mixedwork]
+    bs=8K
+    iodepth=32
+    numjobs=1
+    rw=randrw
+    rwmixread=80
+    size=450Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fio
+spec:
+  serviceName: fio
+  replicas: 6 
+  selector:
+    matchLabels:
+      app: fio
+  template:
+    metadata:
+      labels:
+        app: fio
+    spec:
+      containers:
+      - name: fio
+        image: joshuarobinson/fio:3.19
+        command: ["fio"]
+        args: ["/configs/fio.job", "--eta=never", "--filename_format=$jobnum.$filenum", "--directory=/scratch/"]
+        volumeMounts:
+        - name: fio-config-vol
+          mountPath: /configs
+        - name: fio-data
+          mountPath: /scratch
+      volumes:
+      - name: fio-config-vol
+        configMap:
+          name: fio-job-config
+  volumeClaimTemplates:
+  - metadata:
+      name: fio-data
+    spec:
+      #storageClassName: clvmsimpleclass
+      storageClassName: r10x4max
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi

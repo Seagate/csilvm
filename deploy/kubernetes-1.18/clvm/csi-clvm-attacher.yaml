@@ -37,6 +37,14 @@ spec:
                 values:
                 - csi-clvmplugin
             topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+                - key: storagelake
+                  operator: In
+                  values:
+                  - controller
       serviceAccountName: csi-attacher
       containers:
         - name: csi-attacher

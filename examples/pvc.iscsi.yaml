@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nokomis-testme-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  volumeMode: Filesystem
+  storageClassName: clvm-iscsi
+  resources:
+    requests:
+      storage: 90Gi

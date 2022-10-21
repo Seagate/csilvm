@@ -37,6 +37,14 @@ spec:
                 values:
                 - csi-clvmplugin
             topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+                - key: storagelake
+                  operator: In
+                  values:
+                  - controller
       serviceAccount: csi-snapshotter
       containers:
         - name: csi-snapshotter

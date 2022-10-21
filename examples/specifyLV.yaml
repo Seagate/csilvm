@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nginx-keeper-a2
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: clvmstorageclass
+  csi:
+    driver: datalake.speedboat.seagate.com
+    volumeHandle: NAME.OF.LVM2.LOGICAL.VOLUME
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nginx-keep-a2
+spec:
+  storageClassName: clvmstorageclass
+  volumeName: nginx-keeper-a2
+  accessModes:
+  - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-a2 
+spec:
+  containers:
+  - image: nginx:latest
+    imagePullPolicy: Always
+    name: nginx
+    ports:
+    - containerPort: 80
+      protocol: TCP
+    volumeMounts:
+      - mountPath: /var/www
+        name: clvm-volume
+  volumes:
+  - name: clvm-volume
+    persistentVolumeClaim:
+      claimName: nginx-keep-a2

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/Seagate/csiclvm/pkg/virsh"
 )
 
 // Control verbose output of all LVM CLI commands
@@ -131,7 +133,7 @@ func (vg *VolumeGroup) BytesFree(raid VolumeLayout) (uint64, error) {
 
 func (r VolumeLayout) extentsFree(count uint64) uint64 {
 	switch r.Type {
-	case VolumeTypeDefault, VolumeTypeLinear:
+	case VolumeTypeDefault, VolumeTypeLinear, VolumeTypeRAID5, VolumeTypeRAID6:
 		return count
 	case VolumeTypeRAID1, VolumeTypeRAID10:
 		mirrors := r.Mirrors
@@ -242,6 +244,8 @@ var (
 	VolumeTypeDefault VolumeType
 	VolumeTypeLinear  = VolumeType{"linear"}
 	VolumeTypeRAID1   = VolumeType{"raid1"}
+	VolumeTypeRAID5   = VolumeType{"raid5"}
+	VolumeTypeRAID6   = VolumeType{"raid6"}
 	VolumeTypeRAID10  = VolumeType{"raid10"}
 )
 
@@ -274,6 +278,12 @@ func (c VolumeLayout) MinNumberOfDevices() uint64 {
 			mirrors = 1
 		}
 		return 2 * mirrors
+	case VolumeTypeRAID5:
+		stripes := c.Stripes
+		return stripes + 1
+	case VolumeTypeRAID6:
+		stripes := c.Stripes
+		return stripes + 2
 	case VolumeTypeRAID10:
 		mirrors := c.Mirrors
 		if mirrors == 0 {
@@ -297,6 +307,10 @@ func (c VolumeLayout) Flags() (fs []string) {
 		fs = append(fs, "--type=linear")
 	case VolumeTypeRAID1:
 		fs = append(fs, "--type=raid1")
+	case VolumeTypeRAID5:
+		fs = append(fs, "--type=raid5")
+	case VolumeTypeRAID6:
+		fs = append(fs, "--type=raid6")
 	case VolumeTypeRAID10:
 		fs = append(fs, "--type=raid10")
 	default:
@@ -330,7 +344,7 @@ func (c VolumeLayout) Flags() (fs []string) {
 	case 1:
 		fs = append(fs, "--nosync")
 	default:
-		// Default behavior of lvmcreate is to synchronize the mirror 
+		// Default behavior of lvmcreate is to synchronize the mirror
 	}
 	return fs
 }
@@ -385,6 +399,8 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 	}
 	args = append(args, opts.Flags()...)
+	args = append(args, "-ay")
+	args = append(args, "-y") // Option to answer yes to wipe if LVM detects xfs signature at block 0
 	if err := run("lvcreate", nil, args...); err != nil {
 		if isInsufficientSpace(err) {
 			return nil, ErrNoSpace
@@ -394,10 +410,13 @@ func (vg *VolumeGroup) CreateLogicalVolume(name string, sizeInBytes uint64, tags
 		}
 		return nil, err
 	}
-	// Deactivate so another node in the cluster can activate
+	// Clear out residual partition info
+	if err := run("wipefs", nil, "--all", "/dev/"+vg.name+"/"+name); err != nil {
+		log.Printf("Error wiping signature block: %v", err)
+	}
 	// If new LV is not activated the --nosyn will be ignored
 	newlv := &LogicalVolume{name, sizeInBytes, vg}
-	newlv.Deactivate()
+	newlv.Deactivate() // Don't activate new LVs.  Let Node Publish do it
 	return newlv, nil
 }
 
@@ -419,6 +438,7 @@ type lvsItem struct {
 	LvPath string `json:"lv_path"`
 	LvSize uint64 `json:"lv_size,string"`
 	LvTags string `json:"lv_tags"`
+	LvUuid string `json:"lv_uuid"`
 }
 
 func (lv lvsItem) tagList() (tags []string) {
@@ -505,7 +525,7 @@ func (vg *VolumeGroup) FindLogicalVolume(matchFirst func(lvsItem) bool) (*Logica
 	return nil, ErrLogicalVolumeNotFound
 }
 
-func RefreshMetaData(){
+func RefreshMetaData() {
 	c := exec.Command("partprobe")
 	log.Printf("Executing: partprobe")
 	c.Run()
@@ -648,6 +668,10 @@ func (lv *LogicalVolume) SizeInBytes() uint64 {
 	return lv.sizeInBytes
 }
 
+func (lv *LogicalVolume) VgName() string {
+	return lv.vg.name
+}
+
 // Path returns the device path for the logical volume.
 func (lv *LogicalVolume) Path() (string, error) {
 	result := new(lvsOutput)
@@ -682,13 +706,32 @@ func (lv *LogicalVolume) Tags() ([]string, error) {
 	return nil, ErrLogicalVolumeNotFound
 }
 
+// Return the UUID of the LV .
+func (lv *LogicalVolume) Uuid() (string, error) {
+	result := new(lvsOutput)
+	if err := run("lvs", result, "--options=lv_uuid", lv.vg.name+"/"+lv.name); err != nil {
+		if IsLogicalVolumeNotFound(err) {
+			return "", ErrLogicalVolumeNotFound
+		}
+		return "", err
+	}
+	for _, report := range result.Report {
+		for _, lv := range report.Lv {
+
+			return lv.LvUuid, nil
+		}
+	}
+	return "", ErrLogicalVolumeNotFound
+}
+
+
+
 func (lv *LogicalVolume) Remove() error {
 	if err := run("lvremove", nil, "-f", lv.vg.name+"/"+lv.name); err != nil {
 		return err
 	}
 	return nil
 }
-
 
 func (lv *LogicalVolume) Activate() error {
 	if err := run("lvchange", nil, "-ay", lv.vg.name+"/"+lv.name); err != nil {
@@ -699,6 +742,20 @@ func (lv *LogicalVolume) Activate() error {
 
 func (lv *LogicalVolume) Deactivate() error {
 	if err := run("lvchange", nil, "-an", lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lv *LogicalVolume) AddTag(tag string) error {
+	if err := run("lvchange", nil, "--addtag", tag, lv.vg.name+"/"+lv.name); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lv *LogicalVolume) DeleteTag(tag string) error {
+	if err := run("lvchange", nil, "--addtag", tag, lv.vg.name+"/"+lv.name); err != nil {
 		return err
 	}
 	return nil
@@ -909,24 +966,6 @@ func LookupPhysicalVolume(name string) (*PhysicalVolume, error) {
 // https://github.com/Jajcus/lvm2/blob/266d6564d7a72fcff5b25367b7a95424ccf8089e/lib/metadata/metadata.c#L983
 
 func run(cmd string, v interface{}, extraArgs ...string) error {
-	// lvmlock can be nil, as it is a global variable that is intended to be
-	// initialized from calling code outside this package. We have no way of
-	// knowing whether the caller performed that initialization and must
-	// defensively check. In the future, we may decide to simply panic with a
-	// nil pointer dereference.
-	if lvmlock != nil {
-		// We use Lock instead of TryLock as we have no alternative way of
-		// making progress. We expect lvm2 command-line utilities invoked by
-		// this package to return within a reasonable amount of time.
-		if lerr := lvmlock.Lock(); lerr != nil {
-			return fmt.Errorf("lvm: acquire lock failed: %v", lerr)
-		}
-		defer func() {
-			if lerr := lvmlock.Unlock(); lerr != nil {
-				panic(fmt.Sprintf("lvm: release lock failed: %v", lerr))
-			}
-		}()
-	}
 	var args []string
 	if v != nil {
 		args = append(args, "--reportformat=json")
@@ -934,25 +973,37 @@ func run(cmd string, v interface{}, extraArgs ...string) error {
 		args = append(args, "--nosuffix")
 	}
 	args = append(args, extraArgs...)
-	c := exec.Command(cmd, args...)
-	log.Printf("Executing: %v", c)
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	c.Stdout = stdout
-	c.Stderr = stderr
-	if err := c.Run(); err != nil {
-		errstr := ignoreWarnings(stderr.String())
-		log.Print("stdout: " + stdout.String())
-		log.Print("stderr: " + errstr)
-		return errors.New(errstr)
-	}
-	stdoutbuf := stdout.Bytes()
-	stderrbuf := stderr.Bytes()
-	errstr := ignoreWarnings(string(stderrbuf))
-	log.Printf("stdout: " + string(stdoutbuf))
-	log.Printf("stderr: " + errstr)
-	if v != nil {
-		if err := json.Unmarshal(stdoutbuf, v); err != nil {
-			return fmt.Errorf("%v: [%v]", err, string(stdoutbuf))
+	if virsh.ProxyMode() {
+		res, err := virsh.ProxyStoLakeRun(cmd, args...)
+		if err != nil {
+			return fmt.Errorf("PROXY ERROR: %v", err)
+		}
+		if v != nil {
+			if err := json.Unmarshal(res, v); err != nil {
+				return fmt.Errorf("%v: [%v]", err, res)
+			}
+		}
+	} else {
+		c := exec.Command(cmd, args...)
+		log.Printf("Executing: %v", c)
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		c.Stdout = stdout
+		c.Stderr = stderr
+		if err := c.Run(); err != nil {
+			errstr := ignoreWarnings(stderr.String())
+			log.Print("stdout: " + stdout.String())
+			log.Printf("stderr: %v ", err)
+			return errors.New(errstr)
+		}
+		stdoutbuf := stdout.Bytes()
+		stderrbuf := stderr.Bytes()
+		errstr := ignoreWarnings(string(stderrbuf))
+		log.Printf("stdout: " + string(stdoutbuf))
+		log.Printf("stderr: " + errstr)
+		if v != nil {
+			if err := json.Unmarshal(stdoutbuf, v); err != nil {
+				return fmt.Errorf("%v: [%v]", err, string(stdoutbuf))
+			}
 		}
 	}
 	return nil

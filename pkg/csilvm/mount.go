@@ -1,9 +1,15 @@
 package csilvm
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
+	"github.com/Seagate/csiclvm/pkg/virsh"
+	"fmt"
 	"io/ioutil"
+	"path/filepath"
 	"strings"
+	"os/exec"
 )
 
 /*
@@ -36,6 +42,8 @@ type mountpoint struct {
 	fstype      string
 	mountopts   []string
 	mountsource string
+	blockpath   string  //Full disk-by-path of source
+	datapath    string  //Connection Method: SAS, ISCSI,...
 }
 
 func (m *mountpoint) isReadonly() bool {
@@ -48,6 +56,13 @@ func (m *mountpoint) isReadonly() bool {
 }
 
 func listMounts() (mounts []mountpoint, err error) {
+	if virsh.ProxyMode() {
+		buf, err := virsh.MountInfo()
+		if err != nil {
+			return nil, err
+		}
+		return parseMountinfo(buf)
+	}
 	buf, err := ioutil.ReadFile("/proc/self/mountinfo")
 	if err != nil {
 		return nil, err
@@ -74,12 +89,18 @@ func parseMountinfo(buf []byte) (mounts []mountpoint, err error) {
 		if !foundSep {
 			return nil, errors.New("Failed to parse /proc/mountinfo")
 		}
+		blockpath := getBlockPath(fields[sepoffset+2])
 		mount := mountpoint{
 			root:        fields[3],
 			path:        fields[4],
 			fstype:      fields[sepoffset+1],
 			mountopts:   strings.Split(fields[5], ","),
 			mountsource: fields[sepoffset+2],
+			blockpath:   blockpath,
+			datapath:    dataPathType(blockpath),
+		}
+		if  mount.datapath == "" {
+			fmt.Printf("NO DATAPATH::%v \n", mount)
 		}
 		mounts = append(mounts, mount)
 	}
@@ -114,3 +135,53 @@ func getMountsAt(path string) ([]mountpoint, error) {
 	}
 	return mps, nil
 }
+
+func getBlockPath(blkdev string) string {
+	// if LVM2 LV then return blkdev and blockpath
+	if len(blkdev) > 10 {
+		if blkdev[0:10] == "/dev/sbvg_" {
+			return blkdev 
+		}
+	}
+	cmd := exec.Command("ls", "-lt", "/dev/disk/by-path/")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("BY-PATH FAILED::%v \n", err)
+		return "" 
+	}
+	scanner := bufio.NewScanner(strings.NewReader(out.String()))
+	for scanner.Scan() {
+		chunks := strings.Split(scanner.Text(), "->")
+		if len(chunks) < 2 {
+			continue
+		}
+		if filepath.Base(chunks[1]) != filepath.Base(blkdev) {
+			continue
+		}
+		words := strings.Fields(chunks[0])
+		if  len(words) > 1 {
+			return words[len(words)-1]
+		}
+	}
+	fmt.Printf("FAILED to find %s in BY-PATH list ::%s \n", blkdev, out.String())
+	return ""
+}
+
+func dataPathType(path string) string {
+	// If blockpath is LVM2 LV then return sas
+	if len(path) > 10 {
+		if path[0:10] == "/dev/sbvg_" {
+			return "sas" 
+		}
+	}
+	chunks := strings.Split(path,"-")
+	if len(chunks) < 4 {
+		fmt.Printf("FAILED to parse BY-PATH ::%+v ", chunks)
+		return ""
+	}
+	return chunks[2]
+}
+
+
