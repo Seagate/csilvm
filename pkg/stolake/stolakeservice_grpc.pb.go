@@ -75,6 +75,12 @@ type StolakeClient interface {
 	RecoverPv(ctx context.Context, in *MissingPvMsg, opts ...grpc.CallOption) (*Res, error)
 	LvConvertRepair(ctx context.Context, in *LvConReq, opts ...grpc.CallOption) (*Res, error)
 	VgReduceMissing(ctx context.Context, in *VgReq, opts ...grpc.CallOption) (*Res, error)
+	LvConvertReplace(ctx context.Context, in *LvConReplaceReq, opts ...grpc.CallOption) (*Res, error)
+	RetrieveLvsOfPv(ctx context.Context, in *LvsOfPvReq, opts ...grpc.CallOption) (*LvsOfPvRes, error)
+	RetrieveFreeExtentOfPv(ctx context.Context, in *FreeExtentOfPvReq, opts ...grpc.CallOption) (*FreeExtentOfPvRes, error)
+	CheckLvSync(ctx context.Context, in *LvSyncReq, opts ...grpc.CallOption) (*LvSyncRes, error)
+	CtrlPubIscsiDrives(ctx context.Context, in *CtrlPubIscsiDrivesReq, opts ...grpc.CallOption) (*CtrlPubIscsiDrivesRes, error)
+	UnCtrlPubIscsiDrives(ctx context.Context, in *UnCtrlPubIscsiDrivesReq, opts ...grpc.CallOption) (*UnCtrlPubIscsiDrivesRes, error)
 }
 
 type stolakeClient struct {
@@ -472,6 +478,60 @@ func (c *stolakeClient) VgReduceMissing(ctx context.Context, in *VgReq, opts ...
 	return out, nil
 }
 
+func (c *stolakeClient) LvConvertReplace(ctx context.Context, in *LvConReplaceReq, opts ...grpc.CallOption) (*Res, error) {
+	out := new(Res)
+	err := c.cc.Invoke(ctx, "/proto.stolake/LvConvertReplace", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) RetrieveLvsOfPv(ctx context.Context, in *LvsOfPvReq, opts ...grpc.CallOption) (*LvsOfPvRes, error) {
+	out := new(LvsOfPvRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/RetrieveLvsOfPv", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) RetrieveFreeExtentOfPv(ctx context.Context, in *FreeExtentOfPvReq, opts ...grpc.CallOption) (*FreeExtentOfPvRes, error) {
+	out := new(FreeExtentOfPvRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/RetrieveFreeExtentOfPv", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) CheckLvSync(ctx context.Context, in *LvSyncReq, opts ...grpc.CallOption) (*LvSyncRes, error) {
+	out := new(LvSyncRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/CheckLvSync", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) CtrlPubIscsiDrives(ctx context.Context, in *CtrlPubIscsiDrivesReq, opts ...grpc.CallOption) (*CtrlPubIscsiDrivesRes, error) {
+	out := new(CtrlPubIscsiDrivesRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/CtrlPubIscsiDrives", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stolakeClient) UnCtrlPubIscsiDrives(ctx context.Context, in *UnCtrlPubIscsiDrivesReq, opts ...grpc.CallOption) (*UnCtrlPubIscsiDrivesRes, error) {
+	out := new(UnCtrlPubIscsiDrivesRes)
+	err := c.cc.Invoke(ctx, "/proto.stolake/UnCtrlPubIscsiDrives", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StolakeServer is the server API for Stolake service.
 // All implementations must embed UnimplementedStolakeServer
 // for forward compatibility
@@ -529,6 +589,12 @@ type StolakeServer interface {
 	RecoverPv(context.Context, *MissingPvMsg) (*Res, error)
 	LvConvertRepair(context.Context, *LvConReq) (*Res, error)
 	VgReduceMissing(context.Context, *VgReq) (*Res, error)
+	LvConvertReplace(context.Context, *LvConReplaceReq) (*Res, error)
+	RetrieveLvsOfPv(context.Context, *LvsOfPvReq) (*LvsOfPvRes, error)
+	RetrieveFreeExtentOfPv(context.Context, *FreeExtentOfPvReq) (*FreeExtentOfPvRes, error)
+	CheckLvSync(context.Context, *LvSyncReq) (*LvSyncRes, error)
+	CtrlPubIscsiDrives(context.Context, *CtrlPubIscsiDrivesReq) (*CtrlPubIscsiDrivesRes, error)
+	UnCtrlPubIscsiDrives(context.Context, *UnCtrlPubIscsiDrivesReq) (*UnCtrlPubIscsiDrivesRes, error)
 	mustEmbedUnimplementedStolakeServer()
 }
 
@@ -664,6 +730,24 @@ func (UnimplementedStolakeServer) LvConvertRepair(context.Context, *LvConReq) (*
 }
 func (UnimplementedStolakeServer) VgReduceMissing(context.Context, *VgReq) (*Res, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VgReduceMissing not implemented")
+}
+func (UnimplementedStolakeServer) LvConvertReplace(context.Context, *LvConReplaceReq) (*Res, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LvConvertReplace not implemented")
+}
+func (UnimplementedStolakeServer) RetrieveLvsOfPv(context.Context, *LvsOfPvReq) (*LvsOfPvRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RetrieveLvsOfPv not implemented")
+}
+func (UnimplementedStolakeServer) RetrieveFreeExtentOfPv(context.Context, *FreeExtentOfPvReq) (*FreeExtentOfPvRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RetrieveFreeExtentOfPv not implemented")
+}
+func (UnimplementedStolakeServer) CheckLvSync(context.Context, *LvSyncReq) (*LvSyncRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckLvSync not implemented")
+}
+func (UnimplementedStolakeServer) CtrlPubIscsiDrives(context.Context, *CtrlPubIscsiDrivesReq) (*CtrlPubIscsiDrivesRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CtrlPubIscsiDrives not implemented")
+}
+func (UnimplementedStolakeServer) UnCtrlPubIscsiDrives(context.Context, *UnCtrlPubIscsiDrivesReq) (*UnCtrlPubIscsiDrivesRes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnCtrlPubIscsiDrives not implemented")
 }
 func (UnimplementedStolakeServer) mustEmbedUnimplementedStolakeServer() {}
 
@@ -1452,6 +1536,114 @@ func _Stolake_VgReduceMissing_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Stolake_LvConvertReplace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LvConReplaceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).LvConvertReplace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/LvConvertReplace",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).LvConvertReplace(ctx, req.(*LvConReplaceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_RetrieveLvsOfPv_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LvsOfPvReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).RetrieveLvsOfPv(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/RetrieveLvsOfPv",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).RetrieveLvsOfPv(ctx, req.(*LvsOfPvReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_RetrieveFreeExtentOfPv_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FreeExtentOfPvReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).RetrieveFreeExtentOfPv(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/RetrieveFreeExtentOfPv",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).RetrieveFreeExtentOfPv(ctx, req.(*FreeExtentOfPvReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_CheckLvSync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LvSyncReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).CheckLvSync(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/CheckLvSync",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).CheckLvSync(ctx, req.(*LvSyncReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_CtrlPubIscsiDrives_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CtrlPubIscsiDrivesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).CtrlPubIscsiDrives(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/CtrlPubIscsiDrives",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).CtrlPubIscsiDrives(ctx, req.(*CtrlPubIscsiDrivesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Stolake_UnCtrlPubIscsiDrives_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnCtrlPubIscsiDrivesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StolakeServer).UnCtrlPubIscsiDrives(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.stolake/UnCtrlPubIscsiDrives",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StolakeServer).UnCtrlPubIscsiDrives(ctx, req.(*UnCtrlPubIscsiDrivesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Stolake_ServiceDesc is the grpc.ServiceDesc for Stolake service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1630,6 +1822,30 @@ var Stolake_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VgReduceMissing",
 			Handler:    _Stolake_VgReduceMissing_Handler,
+		},
+		{
+			MethodName: "LvConvertReplace",
+			Handler:    _Stolake_LvConvertReplace_Handler,
+		},
+		{
+			MethodName: "RetrieveLvsOfPv",
+			Handler:    _Stolake_RetrieveLvsOfPv_Handler,
+		},
+		{
+			MethodName: "RetrieveFreeExtentOfPv",
+			Handler:    _Stolake_RetrieveFreeExtentOfPv_Handler,
+		},
+		{
+			MethodName: "CheckLvSync",
+			Handler:    _Stolake_CheckLvSync_Handler,
+		},
+		{
+			MethodName: "CtrlPubIscsiDrives",
+			Handler:    _Stolake_CtrlPubIscsiDrives_Handler,
+		},
+		{
+			MethodName: "UnCtrlPubIscsiDrives",
+			Handler:    _Stolake_UnCtrlPubIscsiDrives_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

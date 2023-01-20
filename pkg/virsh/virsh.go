@@ -99,6 +99,57 @@ type Stolakeclient struct {
 
 const TIMEOUT = 6 * time.Second //gRPC Timeout Call limit
 
+func StoLakeInfo() (string, error) {
+        sc, connErr := connect()
+        if connErr != nil {
+		return "" , connErr
+        }
+
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.GetInfoReq{}
+	res, err := sc.Client.RetrieveInfo(ctx, req)
+        defer sc.ClientConn.Close()
+	if err != nil {
+		log.Print(err.Error())
+	}
+	return fmt.Sprintf("%s %s",res.GetAgentName(), res.GetVersion()), err
+}
+
+func VgActivate(vgname string) error {
+        sc, connErr := connect()
+        if connErr != nil {
+		return connErr
+        }
+        //ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+        defer cancel()
+	req := &pb.ChgReq{
+		Arg: []string{"--lockstart", vgname },
+	}
+	log.Print("DBG: Start Activate")
+	_, err := sc.Client.VgChange(ctx, req)
+	log.Print("DBG: Complete Activate")
+        defer sc.ClientConn.Close()
+	return err
+}
+
+func VgDeActivate(vgname string) error {
+        sc, connErr := connect()
+        if connErr != nil {
+		return connErr
+        }
+        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+        defer cancel()
+	req := &pb.ChgReq{
+		Arg: []string{"--lockstop", vgname },
+	}
+	_, err := sc.Client.VgChange(ctx, req)
+        defer sc.ClientConn.Close()
+	return err
+}
+
+
 func ProxyStoLakeRun(cmd string, args ...string) ([]byte, error) {
 	//CSICheck()
         sc, connErr := connect()
@@ -353,7 +404,7 @@ func MountVolume(source, target, fstype, guid, mountoptions string, readonly, al
 		AllUsers:  allusers,
 	}
 	res, err := sc.Client.MountVolume(ctx, req)
-	log.Printf("STOLAKEPROXY RESULT: %v \n", res)
+	log.Printf("DBG: MOUNTVOL %v :: RESULT: %v \n",req, res)
         defer sc.ClientConn.Close()
 	if err != nil {
 		log.Print(err.Error())
@@ -604,6 +655,68 @@ func UnStageIscsiTarget(lvuuid, initiqn string) error {
 }
 
 
+// Save last attempt when target setup takes too long the first time
+var lastTargetSetup = time.Now().Add(time.Duration(-5 * time.Minute))
+var lastVgName = ""
+var lastInitIqn = ""
+var lastTargetList = ""
+
+func JbofStageIscsiTargets(vgname, stolakejbofurls, initiqn string) (targetlist string, err error) {
+	// Send cached value if less than 2 minutes old
+	if time.Since(lastTargetSetup).Seconds() < 120 {
+		log.Printf("Using Last Saved results  : %s ", lastTargetList)
+		if vgname == lastVgName && initiqn == lastInitIqn && lastTargetList != "" {
+			return lastTargetList, nil
+		}
+	}
+
+	for _, jbofurl := range strings.Split(stolakejbofurls, ",") {
+		if jbofurl == "" {
+			continue
+		}
+		log.Printf("DBG: Setting Up targets on %s ", jbofurl)
+		sc, connErr := stolakeConnect(jbofurl)
+		//FIXME Should the target we abort or go to next JBOF on error and offer an incomplete target map list??
+	        if connErr != nil {
+			log.Printf("DBG: Failed to connect to  %s ", jbofurl)
+			return "", connErr
+	        }
+
+		//gRPC Timeout Call limit increased due to service time of setting up a large number of drives
+		TIMEOUT := 120 * time.Second
+	        ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+	        defer cancel()
+		req := &pb.CtrlPubIscsiDrivesReq {
+			VgName: vgname,
+			InitiatorIqn:  initiqn,
+		}
+		res, _ := sc.Client.CtrlPubIscsiDrives(ctx, req)
+		//res, err := sc.Client.CtrlPubIscsiDrives(ctx, req)
+		//FIXME Should the target we abort or go to next JBOF on error and offer an incomplete target map list??
+	        defer sc.ClientConn.Close()
+
+		for _, tportal := range res.GetTargets() {
+			portal := tportal.GetTargetPortal()
+			//  If portal is 0.0.0.0 then use url IP
+			if portal[0:7] == "0.0.0.0" {
+				ipadr := strings.Split(jbofurl, ":")
+				portal = ipadr[0] + portal[7:len(portal)]
+			}
+			targetlist = targetlist + tportal.GetTargetIqn() + "#"+  tportal.GetLun() + "#"+ portal + ","
+		}
+	}
+	log.Printf("DBG: TARGET LIST FINAL : %v ", targetlist)
+	// Save a cache of the results
+	if err == nil {
+		lastTargetSetup = time.Now()
+		lastVgName = vgname
+		lastInitIqn = initiqn
+		lastTargetList = targetlist
+	}
+
+	return targetlist, err
+}
+
 func IscsiTargetExists(targetiqn, portal string)  bool {
 	var args []string
 	args = append(args, "-m", "node")
@@ -633,6 +746,7 @@ func LoginIscsiTarget(targetiqn, portal string) ( string, error) {
 	args = []string{ "-m", "node", "--login"}
 	args = append(args, "--target", targetiqn)
 	args = append(args, "--portal", portal)
+	log.Printf("DBG: ISCSADM CALL: iscsiadm  %v", args)
 	_, err = ProxyStoLakeRun("iscsiadm", args...)
 	if err != nil {
 		return "", fmt.Errorf("ISCSADM ERROR: %v : %v", args, err)
@@ -642,6 +756,7 @@ func LoginIscsiTarget(targetiqn, portal string) ( string, error) {
 		return "", err2
 	}
 	for _, scsidev := range scsidevs {
+		log.Printf("DBG: ISCSADM TRANS:\n>> %s <<\n>> %s <<", scsidev.transport, targetiqn )
 		if scsidev.transport == targetiqn {
 			return scsidev.blkdev, nil
 		}
@@ -782,10 +897,13 @@ func BlkID(blkdev string) (string, error) {
 	return "", errors.New("Can't find blockid device on host")
 }
 
-
 func connect() (*Stolakeclient, error) {
+        return stolakeConnect("unix://"+StolakeURL)
+}
+
+func stolakeConnect(stolakeurl string) (*Stolakeclient, error) {
         // Set up a connection to the server.
-        conn, err := grpc.Dial("unix://"+StolakeURL, grpc.WithInsecure(), grpc.WithBlock())
+        conn, err := grpc.Dial(stolakeurl, grpc.WithInsecure(), grpc.WithBlock())
         if err != nil {
                 logger.Error(err, "Failed to connect to Server")
                 log.Printf("Failed to connect to Server \n%v\n",err)
