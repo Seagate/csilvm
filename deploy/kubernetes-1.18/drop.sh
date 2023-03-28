@@ -12,6 +12,8 @@
 
 # exit
 
+kubectl delete -f csi.agents.yaml
+
 
 # This script captures the steps required to deploy the clvm  plugin driver.  
 

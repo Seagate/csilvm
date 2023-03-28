@@ -206,7 +206,11 @@ func (s *Server) Setup() error {
 		//return fmt.Errorf( "Cannot lookup volume group %v: err=%v", s.vgname, err)
 		log.Printf( "Cannot lookup volume group %v: err=%v", s.vgname, err)
 	}else{
-		log.Printf("Found volume group %v", s.vgname)
+		log.Printf("Found volume group %v. Starting Locks", s.vgname)
+		err := virsh.VgActivate(s.vgname)
+		if err != nil {
+			log.Printf( "FAILED to start start VG lock for %v :: err=%v", s.vgname, err)
+		}
 	}
 	s.volumeGroup = volumeGroup
 	return nil
