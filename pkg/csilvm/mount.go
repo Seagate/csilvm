@@ -87,22 +87,27 @@ func parseMountinfo(buf []byte) (mounts []mountpoint, err error) {
 			}
 		}
 		if !foundSep {
-			return nil, errors.New("Failed to parse /proc/mountinfo")
+			return nil, errors.New("Failed to parse /proc/self/mountinfo")
 		}
 		blockpath := getBlockPath(fields[sepoffset+2])
-		mount := mountpoint{
-			root:        fields[3],
-			path:        fields[4],
-			fstype:      fields[sepoffset+1],
-			mountopts:   strings.Split(fields[5], ","),
-			mountsource: fields[sepoffset+2],
-			blockpath:   blockpath,
-			datapath:    dataPathType(blockpath),
+		if  blockpath == "" {
+			fmt.Printf("NO BLOCK PATH PARSING:: %s \n",line)
+		} else {
+			mount := mountpoint{
+				root:        fields[3],
+				path:        fields[4],
+				fstype:      fields[sepoffset+1],
+				mountopts:   strings.Split(fields[5], ","),
+				mountsource: fields[sepoffset+2],
+				blockpath:   blockpath,
+				datapath:    dataPathType(blockpath),
+			}
+			if  mount.datapath == "" {
+				fmt.Printf("NO DATAPATH PARSING:: %s ::%v \n",line, mount)
+			} else {
+				mounts = append(mounts, mount)
+			}
 		}
-		if  mount.datapath == "" {
-			fmt.Printf("NO DATAPATH::%v \n", mount)
-		}
-		mounts = append(mounts, mount)
 	}
 	return mounts, nil
 }
@@ -165,7 +170,8 @@ func getBlockPath(blkdev string) string {
 			return words[len(words)-1]
 		}
 	}
-	fmt.Printf("FAILED to find %s in BY-PATH list ::%s \n", blkdev, out.String())
+	fmt.Printf("DBG FAILED to find %s in BY-PATH list  \n", blkdev )
+	//fmt.Printf("DBG FAILED to find %s in BY-PATH list ::%s \n", blkdev, out.String())
 	return ""
 }
 

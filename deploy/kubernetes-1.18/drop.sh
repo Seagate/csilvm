@@ -12,8 +12,6 @@
 
 # exit
 
-kubectl delete -f csi.agents.yaml
-
 
 # This script captures the steps required to deploy the clvm  plugin driver.  
 
@@ -21,6 +19,7 @@ set -e
 set -o pipefail
 
 BASE_DIR=$(dirname "$0")
+kubectl delete -f ${BASE_DIR}/csi.agents.yaml
 
 
 # deleting  clvm plugin and registrar sidecar

@@ -1,0 +1,39 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   # Select an unique name for this StorageClass
+   name: nvmejbof
+
+# The provisioner for this StorageClass is the shared VolumeGroup setup by the CSI plug-in 
+# Multiple StorageClasses can use the same provisioner and underlying storage for a mix of RAID of LVs in the VG.
+
+provisioner: datalake.speedboat.seagate.com
+# If reclaimPolicy is set to Delete the CSI Controller will delete the LVM2 volume when the CSI Persistent Volume is deleted.
+
+reclaimPolicy: Delete
+# Parameters guide the CSI controller and node agent in setup the LVM2 Logical Volumes as CSI Peristent Volumes
+
+parameters:
+   # PVCs created from this StorageClass can be attached (published) on a node using one of the following methods (case-insensitive):
+   #     SAS:    Use this option for SAS attached drives and systems. (Default)
+   #     NVMe:   Use this option for NVMe attached drives and systems.
+   #     iSCSI:  The CSI Controller instance will configure an iSCSI Target on its node and Initiator on the worker node running the Pod
+   #     NVMeoF: The CSI Controller instance will configure an NVMeoF Target on its node and Initiator on the worker node running the Pod
+   #     QEMU:   The CSI Controller running on the Hypervisor will pass the LVM2 volume as a block device to the virtual machine running the Pod.
+   datapath: NVMeoFJBOF
+   # The type parameter is used as the lvcreate --type options.  
+   # Currently the CSI plug-in supports linear, raid1, raid5, raid6 and raid10. Default is linear
+   type: raid0
+   # The stripes paramter is used as the lvcreate --stripes options.  See https://linux.die.net/man/8/lvcreate
+   #stripes: "4"
+   # The nosync option skips the zeroing of Raid members.  This maybe enabled when SSDs guarantees that unmapped LBA will always return zero.
+   nosync: "yes"
+   # Block I/O transactions may be limited based on the size of PVC in GigaBytes.
+   # The value is saved as an LVM2 tag when the LV is activated as part of the Node Publish operation
+   #iopspergb: "6"
+   # Block throughput in MBytes/second may be limited based on the size of PVC in GigaBytes
+   #mbpspergb: "0.48"
+
+   #### NVMe  ####
+   SsdSerials: "7W8002HW SomeSN1 SomeSN2"
+

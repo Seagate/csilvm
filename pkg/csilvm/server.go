@@ -703,11 +703,11 @@ func (s *Server) ControllerPublishVolume(
 		case "qemu":
 			return nil, ErrUnsupportDatapath
 		case "direct":
+			fallthrough
+		default:
 			pubcontext["blockid"] = "notneeded"
 			response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
 			return response, nil
-		default:
-			return nil, ErrUnsupportDatapath
 	}
 	return nil, ErrUnsupportDatapath
 
@@ -1541,18 +1541,17 @@ func (s *Server) NodeUnpublishVolume(
 		default:
 			log.Printf("Unmounting Unknown datapath device %s :: %v", mp.datapath,mp)
 			const umountFlags = 0
-			log.Printf("Unmounting %v", targetPath)
+			log.Printf("Unmounting %v target", targetPath)
 			if err := syscall.Unmount(targetPath, umountFlags); err != nil {
 				_, ok := err.(syscall.Errno)
 				if !ok {
-					return nil, status.Errorf(codes.Internal, "Failed to perform unmount: err=%v", err)
+					return nil, status.Errorf(codes.Internal, "Failed to calling unmount: err=%v", err)
 				}
-				return nil, status.Errorf(
-					codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+				return nil, status.Errorf(codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+			}
 			log.Printf("Deleting Target Path  %s", targetPath)
 			os.RemoveAll(targetPath)
 			return response, nil
-		}
 	}
 	// Can't Happen
 	return nil, status.Errorf(codes.Internal,"ERROR with Unpublish handling")
@@ -1680,6 +1679,15 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 		switch voltype {
 		case "linear":
 			layout.Type = lvm.VolumeTypeLinear
+			strps, ok := params["stripes"]
+			if ok {
+				delete(params, "stripes")
+				stripes, err := strconv.ParseUint(strps, 10, 64)
+				if err != nil || stripes < 1 {
+					return layout, fmt.Errorf("The 'stripes' parameter must be a positive integer: err=%v", err)
+				}
+				layout.Stripes = stripes
+			}
 		case "raid1":
 			layout.Type = lvm.VolumeTypeRAID1
 			smirrors, ok := params["mirrors"]

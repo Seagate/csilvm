@@ -242,7 +242,7 @@ var (
 	// VolumeTypeDefault is the zero-value of VolumeType and is used to
 	// specify no --type= flag if an empty VolumeLayout is provided.
 	VolumeTypeDefault VolumeType
-	VolumeTypeLinear  = VolumeType{"linear"}
+	VolumeTypeLinear  = VolumeType{""}
 	VolumeTypeRAID1   = VolumeType{"raid1"}
 	VolumeTypeRAID5   = VolumeType{"raid5"}
 	VolumeTypeRAID6   = VolumeType{"raid6"}
@@ -304,7 +304,7 @@ func (c VolumeLayout) Flags() (fs []string) {
 	case VolumeTypeDefault:
 		// We return no --type flag if no config was specified.
 	case VolumeTypeLinear:
-		fs = append(fs, "--type=linear")
+		fs = append(fs, "")   // This no-op is to remind me that linear is without type parameter.
 	case VolumeTypeRAID1:
 		fs = append(fs, "--type=raid1")
 	case VolumeTypeRAID5:
