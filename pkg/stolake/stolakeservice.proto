@@ -68,6 +68,14 @@ service stolake {
     rpc RecoverPv(MissingPvMsg) returns (Res);
     rpc LvConvertRepair(LvConReq) returns (Res);
     rpc VgReduceMissing(VgReq) returns (Res);
+
+    rpc LvConvertReplace(LvConReplaceReq) returns (Res);
+    rpc RetrieveLvsOfPv(LvsOfPvReq) returns (LvsOfPvRes);
+    rpc RetrieveFreeExtentOfPv(FreeExtentOfPvReq) returns (FreeExtentOfPvRes);
+    rpc CheckLvSync(LvSyncReq) returns (LvSyncRes);
+
+    rpc CtrlPubIscsiDrives(CtrlPubIscsiDrivesReq) returns (CtrlPubIscsiDrivesRes);
+    rpc UnCtrlPubIscsiDrives(UnCtrlPubIscsiDrivesReq) returns (UnCtrlPubIscsiDrivesRes);
 }
 
 message GetInfoReq {
@@ -91,6 +99,7 @@ message TopLvInfo {
     string VgName = 2;
     string LvFullName = 3;
     string RaidType = 4;
+    string Health = 5;
 }
 
 message LvConReq {
@@ -126,6 +135,50 @@ message LV {
 	string Copypercent = 11;
 	repeated LV NestedLV = 12;
 	repeated string CfgPV = 13;
+}
+
+message LvConReplaceReq {
+    string OldPvPath = 1;
+    string LvPath = 2;
+    string NewPvPath = 3;
+}
+
+message LvsOfPvReq {
+    string PvName = 1;
+}
+
+message LvsOfPvRes {
+    message LvInfo {
+        string  PvName = 1;
+        string  VgName = 2;
+        string  LvName = 3;        
+        string  LvPath = 4;
+        int64   LvSize = 5;
+        uint64  LvExtentSize = 6;
+    }
+    repeated LvInfo LvsOfPv = 1;
+}
+
+message FreeExtentOfPvReq {
+    string PvName = 1;
+}
+
+message FreeExtentOfPvRes {
+    message ExtentInfo {
+        string  PvName = 1;
+        uint64  ExtentStart = 2;
+        uint64  ExtentSize = 3;
+        uint64  ExtentEnd = 4;
+    }
+    repeated ExtentInfo FreeExtentOfPv = 1;
+}
+
+message LvSyncReq {
+    string LvPath = 1;
+}
+
+message LvSyncRes {
+    string SyncPercent = 1;
 }
 
 message GetUdevReq {
@@ -429,6 +482,29 @@ message ListIscsiRes {
     // Returns a list of Target structs, containing the 4 values of the
     // parameters in Target.
     repeated Target Targets = 1;
+}
+
+message CtrlPubIscsiDrivesReq {
+    string VgName = 1;
+    string InitiatorIqn = 2;
+}
+
+message CtrlPubIscsiDrivesRes {
+    message Target {
+        string TargetIqn = 1;
+        string Lun = 2;
+        string TargetPortal = 3;
+    }
+    repeated Target Targets = 1;
+}
+
+message UnCtrlPubIscsiDrivesReq {
+    string VgName = 1;
+    string InitiatorIqn = 2;
+}
+
+message UnCtrlPubIscsiDrivesRes {
+    //Intentionally empty.
 }
 
 // NVMEoF //

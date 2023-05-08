@@ -193,14 +193,25 @@ func (s *Server) Setup() error {
 				err)
 		}
 	}
-	log.Printf("Looking up volume group %v", s.vgname)
-	var volumeGroup *lvm.VolumeGroup
-	var err error
-	volumeGroup, err = lvm.LookupVolumeGroup(s.vgname)
-	if err != nil {
-		return fmt.Errorf( "Cannot lookup volume group %v: err=%v", s.vgname, err)
+	log.Printf("Checking StoLake Agent version..." )
+	stolakeVer, err := virsh.StoLakeInfo()
+	if  err != nil {
+		log.Printf("Stolake Agent Not found %v ",err)
+		return fmt.Errorf( "Stolake Agent not found  err=%v", err)
 	}
-	log.Printf("Found volume group %v", s.vgname)
+	log.Printf("STOLAKE VERSION: %s", stolakeVer)
+	log.Printf("Looking up volume group %v", s.vgname)
+	volumeGroup, err2 := lvm.LookupVolumeGroup(s.vgname)
+	if err2 != nil {
+		//return fmt.Errorf( "Cannot lookup volume group %v: err=%v", s.vgname, err)
+		log.Printf( "Cannot lookup volume group %v: err=%v", s.vgname, err)
+	}else{
+		log.Printf("Found volume group %v. Starting Locks", s.vgname)
+		err := virsh.VgActivate(s.vgname)
+		if err != nil {
+			log.Printf( "FAILED to start start VG lock for %v :: err=%v", s.vgname, err)
+		}
+	}
 	s.volumeGroup = volumeGroup
 	return nil
 }
@@ -479,6 +490,10 @@ func (s *Server) CreateVolume(
 	} else {
 		attr["datapath"] = "direct" 
 	}
+	jbofs, ok4 := params["stolakejobfurls"]
+	if ok4 {
+		attr["stolakejobfurls"] = jbofs
+	}
 
 	defer s.reportStorageMetrics()
 	response := &csi.CreateVolumeResponse{
@@ -633,15 +648,15 @@ func (s *Server) ControllerPublishVolume(
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "no volume capabilities provided")
 	}
-
-	lv, err := s.volumeGroup.LookupLogicalVolume(volumeID)
-	if err != nil {
-		log.Printf("ControllerPublish could not find volume with id=%v", volumeID)
-		return nil, ErrVolumeNotFound
-	}
-
-	switch pubcontext["datapath"] {
+	switch strings.ToLower(pubcontext["datapath"]) {
+		// Export LV as ISCSI Target on this controller node
 		case "iscsi": {
+			lv, err := s.volumeGroup.LookupLogicalVolume(volumeID)
+			if err != nil {
+				log.Printf("ControllerPublish could not find volume with id=%v", volumeID)
+				return nil, ErrVolumeNotFound
+			}
+
 			// Pass Initiator IQN from NodeID and LV UUID to Staging Stolake 
 			lvuuid, err :=  lv.Uuid()
 			if  err != nil {
@@ -665,16 +680,34 @@ func (s *Server) ControllerPublishVolume(
 			pubcontext["portal"] = targetportal
 			return  &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}, nil
 		}
+		// JBOF ISCSI Mode: Controller agent creates iscsi targets and passes list of targets back in pubcontext 
+		case "jbofis": {
+			// Validate list of 1 or more servers running stolake as a target builder service emulating a JBOF
+			stolakeURLs, ok := pubcontext["stolakejobfurls"]
+			if !ok  {
+				return nil, status.Error(codes.InvalidArgument, "Missing stolakejobfurls parameter in storage class")
+			}
+			log.Printf("Setting Up iSCSI Targets for % on  %s for %s ", s.vgname, stolakeURLs, nodeID)
+			targetlist, err2 := virsh.JbofStageIscsiTargets(s.vgname, stolakeURLs, nodeID)
+			if  err2 != nil {
+				log.Printf("SCSI Target Setup Error %v", err2)
+				return nil, ErrVolumeNotFound
+			}
+
+			pubcontext["blockid"] =  "unknown at CtrlPub phase"
+			pubcontext["targetlist"] = targetlist
+			return  &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}, nil
+		}
 		case "nvme":
 			return nil, ErrUnsupportDatapath
 		case "qemu":
 			return nil, ErrUnsupportDatapath
 		case "direct":
+			fallthrough
+		default:
 			pubcontext["blockid"] = "notneeded"
 			response := &csi.ControllerPublishVolumeResponse{PublishContext: pubcontext}
 			return response, nil
-		default:
-			return nil, ErrUnsupportDatapath
 	}
 	return nil, ErrUnsupportDatapath
 
@@ -1036,13 +1069,39 @@ var ErrTargetPathRW = status.Error(
 func (s *Server) NodePublishVolume(
 	ctx context.Context,
 	request *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	id := request.GetVolumeId()
 	pubcontext := request.GetPublishContext()
 	sourcePath := ""
 	if _, ok := pubcontext["datapath"]; !ok {
 		return nil, status.Errorf(codes.Internal,"Missing 'datapath' in PubContxt: %v", pubcontext)
 	}
-	if pubcontext["datapath"] == "direct" {
+
+	if pubcontext["datapath"] == "jbofis" {
+		log.Printf("Logging into iSCSI Targets")
+		targetlist, ok := pubcontext["targetlist"]
+		if !ok {
+			return nil, status.Errorf(codes.Internal,"Missing targetlist in PubContxt: %v", pubcontext)
+		}
+		targets := strings.Split(targetlist, ",")
+		for _, target := range targets {
+			chnks := strings.Split(target, "#")
+			if len(chnks) == 3 {
+				// Setup iscsi initiators for each drive
+				blkdev, err := virsh.LoginIscsiTarget(chnks[0], chnks[2])
+				if err != nil {
+					//FIXME:  Need to clean up prior successful target setups
+					return nil, status.Errorf(codes.Internal,"ISCSI Login Failes %v :: %v", chnks,err)
+				}
+				log.Printf("Volume path for %s is %v",chnks[0], blkdev)
+			}
+		}
+		err := virsh.VgActivate(s.vgname)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal,"FAILED to Find VG %s after ISCSI Login :: %v", s.vgname,err)
+		}
+	}
+
+	id := request.GetVolumeId()
+	if pubcontext["datapath"] == "direct" || pubcontext["datapath"] == "jbofis" {
 		log.Printf("Looking up volume with id=%v", id)
 		lv, err := s.volumeGroup.LookupLogicalVolume(id)
 		if err != nil {
@@ -1089,6 +1148,8 @@ func (s *Server) NodePublishVolume(
 		}
 		sourcePath = blkdev
 	}
+
+
 	log.Printf("Volume path is %v", sourcePath)
 	targetPath := request.GetTargetPath()
 	log.Printf("Target path is %v", targetPath)
@@ -1480,18 +1541,17 @@ func (s *Server) NodeUnpublishVolume(
 		default:
 			log.Printf("Unmounting Unknown datapath device %s :: %v", mp.datapath,mp)
 			const umountFlags = 0
-			log.Printf("Unmounting %v", targetPath)
+			log.Printf("Unmounting %v target", targetPath)
 			if err := syscall.Unmount(targetPath, umountFlags); err != nil {
 				_, ok := err.(syscall.Errno)
 				if !ok {
-					return nil, status.Errorf(codes.Internal, "Failed to perform unmount: err=%v", err)
+					return nil, status.Errorf(codes.Internal, "Failed to calling unmount: err=%v", err)
 				}
-				return nil, status.Errorf(
-					codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+				return nil, status.Errorf(codes.FailedPrecondition, "Failed to perform unmount: err=%v", err)
+			}
 			log.Printf("Deleting Target Path  %s", targetPath)
 			os.RemoveAll(targetPath)
 			return response, nil
-		}
 	}
 	// Can't Happen
 	return nil, status.Errorf(codes.Internal,"ERROR with Unpublish handling")
@@ -1619,6 +1679,15 @@ func takeVolumeLayoutFromParameters(params map[string]string) (layout lvm.Volume
 		switch voltype {
 		case "linear":
 			layout.Type = lvm.VolumeTypeLinear
+			strps, ok := params["stripes"]
+			if ok {
+				delete(params, "stripes")
+				stripes, err := strconv.ParseUint(strps, 10, 64)
+				if err != nil || stripes < 1 {
+					return layout, fmt.Errorf("The 'stripes' parameter must be a positive integer: err=%v", err)
+				}
+				layout.Stripes = stripes
+			}
 		case "raid1":
 			layout.Type = lvm.VolumeTypeRAID1
 			smirrors, ok := params["mirrors"]
@@ -1713,6 +1782,11 @@ func volumeOptsFromParameters(in map[string]string) (opts []lvm.CreateLogicalVol
 	_, ok := params["datapath"]
 	if ok {
 		delete(params, "datapath")
+	}
+
+	_, ok = params["stolakejobfurls"]
+	if ok {
+		delete(params, "stolakejobfurls")
 	}
 
 	// Ignore QOS settings

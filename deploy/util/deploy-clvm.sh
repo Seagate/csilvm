@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 
-# This script captures the steps required to deploy the clvm  plugin driver.  
+# This script captures the steps required to deploy the clvm agents and plugin driver.  
 
 # The script assumes that kubectl is available on the OS path
 # where it is executed.
-
 set -e
 set -o pipefail
 
 BASE_DIR=$(dirname "$0")
+
+# Start a controller or node agent on all nodes
+kubectl apply -f ${BASE_DIR}/csi.agents.yaml
 
 # If set, the following env variables override image registry and/or tag for each of the images.
 # They are named after the image name, with hyphen replaced by underscore and in upper case.
