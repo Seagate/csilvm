@@ -353,11 +353,16 @@ func (s *Server) CreateVolume(
 	tags := make([]string, len(s.tags), len(s.tags)+1)
 	copy(tags, s.tags)
 	tags = append(tags, encodedName)
+	params := dupParams(request.GetParameters())
 
+	var attr map[string]string
+	var errg error
+	var lv *lvm.LogicalVolume
+	var volumeID string
 	// Check whether a logical volume with the given name already
 	// exists in this volume group.
 	log.Printf("Determining whether volume %q with encoded name %v already exists", request.GetName(), encodedName)
-	if lv, err := s.volumeGroup.FindLogicalVolume(lvm.LVMatchTag(encodedName)); err == nil {
+	if lv, errg = s.volumeGroup.FindLogicalVolume(lvm.LVMatchTag(encodedName)); errg == nil {
 		log.Printf("Volume %s already exists.", encodedName)
 		// The volume already exists. Determine whether or not the
 		// existing volume satisfies the request. If so, return a
@@ -365,113 +370,105 @@ func (s *Server) CreateVolume(
 		if err := s.validateExistingVolume(lv, request); err != nil {
 			return nil, err
 		}
-		attr, err := s.volumeAttributes(lv)
+		attr, errg = s.volumeAttributes(lv)
+		if errg != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get volume attributes: err=%v", errg)
+		}
+		volumeID = lv.Name()
+	} else {
+		// Generate a random volume name and ensure that it doesn't already exist.
+		const lvPrefix = "csilv"
+		for i := 0; i < 10 && volumeID == ""; i++ {
+			// prefix a random number to avoid stomping on reserved names.
+			tryID := lvPrefix + strconv.FormatUint(rand.Uint64(), 36)
+			log.Printf("Attempting to allocate id=%v for requested volume %q", tryID, request.GetName())
+			if _, err := s.volumeGroup.LookupLogicalVolume(tryID); err == nil {
+				log.Printf("Volume id %s already exists, trying again..", tryID)
+				continue
+			}
+			volumeID = tryID
+		}
+		if volumeID == "" {
+			return nil, status.Error(codes.Internal, "Failed to allocate volume ID")
+		}
+		log.Printf("Volume with id=%v does not already exist", volumeID)
+		layout, err := takeVolumeLayoutFromParameters(params)
 		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Invalid volume layout: err=%v", err)
+		}
+		// Determine the capacity, default to maximum size.
+		size := s.defaultVolumeSize
+		if capacityRange := request.GetCapacityRange(); capacityRange != nil {
+			// Set the volume size to the minimum requested size.
+			size = uint64(capacityRange.GetRequiredBytes())
+			// Get the extentSize for this volume group. The LV size must be a multiple of the extent size.
+			extentSize, err := s.volumeGroup.ExtentSize()
+			if err != nil {
+				return nil, status.Errorf(
+					codes.Internal,
+					"Error in ExtentSize: err=%v",
+					err)
+			}
+			// If size is not already a multiple of extentSize, round it up to the
+			// nearest extentSize.
+			if size%extentSize != 0 {
+				sizeBefore := size
+				size = ((size + extentSize) / extentSize) * extentSize
+				log.Printf("Rounding size up from required_bytes (about %dMiB) to nearest extent size (%dMiB) to get (%dMiB)", sizeBefore>>20, extentSize>>20, size>>20)
+			}
+			// Get bytesFree, it is a multiple of extentSize.
+			bytesFree, err := s.volumeGroup.BytesFree(layout)
+			if err != nil {
+				return nil, status.Errorf(
+					codes.Internal,
+					"Error in BytesFree: err=%v",
+					err)
+			}
+			log.Printf("BytesFree: %v (%dMiB)", bytesFree, bytesFree>>20)
+			// Check whether there is enough free space available.
+			// bytesFree is a multiple of extentSize.
+			if bytesFree < size {
+				return nil, ErrInsufficientCapacity
+			}
+			if limit := capacityRange.GetLimitBytes(); limit != 0 && size > uint64(limit) {
+				// We've already checked that there is sufficient capacity. The only
+				// way we can arrive here is if [required_bytes,limit_bytes] does
+				// not include a multiple of extentSize, in which case we cannot
+				// satisfy this request.
+				return nil, ErrNotMultipleOfExtentSize(extentSize)
+			}
+		}
+		lvopts, err := volumeOptsFromParameters(request.GetParameters())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid parameters: %v", err)
+		}
+
+		log.Printf("Creating logical volume id=%v, size=%v, tags=%v, params=%v", volumeID, size, tags, request.GetParameters())
+		lv, errg = s.volumeGroup.CreateLogicalVolume(volumeID, size, tags, lvopts...)
+		if errg != nil {
+			if err == lvm.ErrInvalidLVName {
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"The volume name is invalid: err=%v",
+					err)
+			}
+			if err == lvm.ErrNoSpace {
+				// Somehow, despite checking for sufficient space
+				// above, we still have insuffient free space.
+				return nil, ErrInsufficientCapacity
+			}
+			if err == lvm.ErrTooFewDisks {
+				return nil, ErrTooFewDisks
+			}
+			return nil, status.Errorf(
+				codes.Internal,
+				"Error in CreateLogicalVolume: err=%v",
+				err)
+		}
+		attr, errg = s.volumeAttributes(lv)
+		if errg != nil {
 			return nil, status.Errorf(codes.Internal, "failed to get volume attributes: err=%v", err)
 		}
-		response := &csi.CreateVolumeResponse{
-			Volume: &csi.Volume{
-				CapacityBytes: int64(lv.SizeInBytes()),
-				VolumeId:      lv.Name(),
-				VolumeContext: attr,
-			},
-		}
-		return response, nil
-	}
-	// Generate a random volume name and ensure that it doesn't already exist.
-	var volumeID string
-	const lvPrefix = "csilv"
-	for i := 0; i < 10 && volumeID == ""; i++ {
-		// prefix a random number to avoid stomping on reserved names.
-		tryID := lvPrefix + strconv.FormatUint(rand.Uint64(), 36)
-		log.Printf("Attempting to allocate id=%v for requested volume %q", tryID, request.GetName())
-		if _, err := s.volumeGroup.LookupLogicalVolume(tryID); err == nil {
-			log.Printf("Volume id %s already exists, trying again..", tryID)
-			continue
-		}
-		volumeID = tryID
-	}
-	if volumeID == "" {
-		return nil, status.Error(codes.Internal, "Failed to allocate volume ID")
-	}
-	log.Printf("Volume with id=%v does not already exist", volumeID)
-	params := dupParams(request.GetParameters())
-	layout, err := takeVolumeLayoutFromParameters(params)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Invalid volume layout: err=%v", err)
-	}
-	// Determine the capacity, default to maximum size.
-	size := s.defaultVolumeSize
-	if capacityRange := request.GetCapacityRange(); capacityRange != nil {
-		// Set the volume size to the minimum requested size.
-		size = uint64(capacityRange.GetRequiredBytes())
-		// Get the extentSize for this volume group. The LV size must be a multiple of the extent size.
-		extentSize, err := s.volumeGroup.ExtentSize()
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Internal,
-				"Error in ExtentSize: err=%v",
-				err)
-		}
-		// If size is not already a multiple of extentSize, round it up to the
-		// nearest extentSize.
-		if size%extentSize != 0 {
-			sizeBefore := size
-			size = ((size + extentSize) / extentSize) * extentSize
-			log.Printf("Rounding size up from required_bytes (about %dMiB) to nearest extent size (%dMiB) to get (%dMiB)", sizeBefore>>20, extentSize>>20, size>>20)
-		}
-		// Get bytesFree, it is a multiple of extentSize.
-		bytesFree, err := s.volumeGroup.BytesFree(layout)
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Internal,
-				"Error in BytesFree: err=%v",
-				err)
-		}
-		log.Printf("BytesFree: %v (%dMiB)", bytesFree, bytesFree>>20)
-		// Check whether there is enough free space available.
-		// bytesFree is a multiple of extentSize.
-		if bytesFree < size {
-			return nil, ErrInsufficientCapacity
-		}
-		if limit := capacityRange.GetLimitBytes(); limit != 0 && size > uint64(limit) {
-			// We've already checked that there is sufficient capacity. The only
-			// way we can arrive here is if [required_bytes,limit_bytes] does
-			// not include a multiple of extentSize, in which case we cannot
-			// satisfy this request.
-			return nil, ErrNotMultipleOfExtentSize(extentSize)
-		}
-	}
-	lvopts, err := volumeOptsFromParameters(request.GetParameters())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid parameters: %v", err)
-	}
-
-	log.Printf("Creating logical volume id=%v, size=%v, tags=%v, params=%v", volumeID, size, tags, request.GetParameters())
-	lv, err := s.volumeGroup.CreateLogicalVolume(volumeID, size, tags, lvopts...)
-	if err != nil {
-		if err == lvm.ErrInvalidLVName {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"The volume name is invalid: err=%v",
-				err)
-		}
-		if err == lvm.ErrNoSpace {
-			// Somehow, despite checking for sufficient space
-			// above, we still have insuffient free space.
-			return nil, ErrInsufficientCapacity
-		}
-		if err == lvm.ErrTooFewDisks {
-			return nil, ErrTooFewDisks
-		}
-		return nil, status.Errorf(
-			codes.Internal,
-			"Error in CreateLogicalVolume: err=%v",
-			err)
-	}
-	attr, err := s.volumeAttributes(lv)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get volume attributes: err=%v", err)
 	}
 
 	// Pass on QOS in Volume Context for ControllerPublish
@@ -1505,21 +1502,26 @@ func (s *Server) NodeUnpublishVolume(
 			log.Printf("Unmounting nvme device %s", mp.blockpath)
 			err :=  virsh.UnMountVolume(targetPath,id)
 			return response, err
+			if err := lv.Deactivate(); err != nil {
+				log.Printf("Failed to de-activate volume: err=%v", err)
+			}
 
 		case "qemu":
 			log.Printf("Unmounting qemu device %s : %s", mp.blockpath,id)
 			err :=  virsh.UnMountVolume(targetPath,id)
 			return response, err
 
-		case "sas":
-			log.Printf("Unmounting SAS device %s : %s", mp.blockpath,id)
+		case "direct":
+			log.Printf("Unmounting Direct attached device %s : %s", mp.blockpath,id)
 			//var err  error
 			lv, err = s.volumeGroup.LookupLogicalVolume(id)
 			// Clear QOS
 			virsh.SetQos(lv.VgName(), lv.Name(), "0", "0")
 			if virsh.ProxyMode() {
 				err :=  virsh.UnMountVolume(targetPath,id)
-				return response, err
+				if err != nil {
+					return response, err
+				}
 			} else {
 				// Unmount not containerized
 				const umountFlags = 0
@@ -1536,7 +1538,6 @@ func (s *Server) NodeUnpublishVolume(
 			if err := lv.Deactivate(); err != nil {
 				log.Printf("Failed to de-activate volume: err=%v", err)
 			}
-			return response, nil
 
 		default:
 			log.Printf("Unmounting Unknown datapath device %s :: %v", mp.datapath,mp)
@@ -1551,10 +1552,11 @@ func (s *Server) NodeUnpublishVolume(
 			}
 			log.Printf("Deleting Target Path  %s", targetPath)
 			os.RemoveAll(targetPath)
-			return response, nil
+			if err := lv.Deactivate(); err != nil {
+				log.Printf("Failed to de-activate volume: err=%v", err)
+			}
 	}
-	// Can't Happen
-	return nil, status.Errorf(codes.Internal,"ERROR with Unpublish handling")
+	return response, nil
 }
 
 func (s *Server) NodeGetInfo(

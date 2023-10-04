@@ -91,7 +91,7 @@ func parseMountinfo(buf []byte) (mounts []mountpoint, err error) {
 		}
 		blockpath := getBlockPath(fields[sepoffset+2])
 		if  blockpath == "" {
-			fmt.Printf("NO BLOCK PATH PARSING:: %s \n",line)
+			fmt.Printf("NO BLOCK PATH PARSING:: %s :: SEP %d \n",line,sepoffset)
 		} else {
 			mount := mountpoint{
 				root:        fields[3],
@@ -176,10 +176,10 @@ func getBlockPath(blkdev string) string {
 }
 
 func dataPathType(path string) string {
-	// If blockpath is LVM2 LV then return sas
+	// If blockpath is LVM2 LV then return direct
 	if len(path) > 10 {
 		if path[0:10] == "/dev/sbvg_" {
-			return "sas" 
+			return "direct" 
 		}
 	}
 	chunks := strings.Split(path,"-")
